@@ -1,6 +1,8 @@
 
 #include <zephyr.h>
 #include <app_event_manager.h>
+#include <zephyr/drivers/pwm.h>
+#include <zephyr/drivers/gpio.h>
 
 #define MODULE motor
 #include "../events/module_state_event.h"
@@ -34,10 +36,10 @@ struct motor_msg_data
 K_MSGQ_DEFINE(motor_module_msg_q, sizeof(struct motor_msg_data), 10, 4);
 
 /* Global module data */
-static const int32_t motor_power = 10000000;
+static const int32_t motor_power = PWM_HZ(2000)/2;
 
-static const struct device *motor_a = DEVICE_DT_GET(DT_NODELABEL(motor_a));
-static const struct device *motor_b = DEVICE_DT_GET(DT_NODELABEL(motor_b));
+static const struct device *motor_a = DEVICE_DT_GET(DT_NODELABEL(motor_0_a));
+static const struct device *motor_b = DEVICE_DT_GET(DT_NODELABEL(motor_0_b));
 
 struct robot_movement_set_msg next_movement = {0};
 static int set_next_angle(int32_t angle)
@@ -55,8 +57,8 @@ static int set_next_time(uint32_t time)
 
 static void stop_motor_work_fn(struct k_work_user *work)
 {
-    drive_continous(motor_a, 0);
-    drive_continous(motor_b, 0);
+    // drive_continous(motor_a, 0);
+    // drive_continous(motor_b, 0);
     LOG_DBG("Stopped motors");
     set_module_state(STANDBY);
 }
@@ -70,8 +72,8 @@ static int turn_degrees(int32_t angle)
 
 static int drive_forward(uint32_t time)
 {
-    drive_continous(motor_a, motor_power);
-    drive_continous(motor_b, motor_power);
+    // drive_continous(motor_a, motor_power);
+    // drive_continous(motor_b, motor_power);
     LOG_DBG("Started motors");
     k_work_schedule(&stop_motor_work, K_MSEC(time));
     return 0;
@@ -150,19 +152,59 @@ static int init_motors()
 {
     LOG_DBG("Initializing motor drivers");
     int err;
-    err = !device_is_ready(motor_a);
-    if (err)
+
+    const struct gpio_dt_spec fault_gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(motor_port0), enable_fault_gpios);
+    if (!device_is_ready(fault_gpio.port))
     {
-        LOG_ERR("Motor a not ready: Error %d", err);
-        return err;
+        LOG_ERR("Fault GPIO not ready");
+        return -EIO;
     }
 
-    err = !device_is_ready(motor_b);
+    gpio_pin_configure_dt(&fault_gpio, GPIO_INPUT);
+
+    // TODO: REMOVE!!!!!
+    const struct gpio_dt_spec phase_gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(motor_0_a), phase_gpios);
+    gpio_pin_configure_dt(&phase_gpio, GPIO_OUTPUT_HIGH);
+    const struct pwm_dt_spec pwm_a = PWM_DT_SPEC_GET(DT_NODELABEL(motor_0_a));
+    if (!device_is_ready(pwm_a.dev))
+    {
+        LOG_ERR("PWM device not found or not ready");
+        return -ENODEV;
+    }
+    err = pwm_set_dt(&pwm_a, pwm_a.period, pwm_a.period/2);
     if (err)
     {
-        LOG_ERR("Motor b not ready: Error %d", err);
+        LOG_ERR("Failed to set PWM period %d ns: Error %d",pwm_a.period, err);
         return err;
     }
+    LOG_DBG("Channel %d on PWM %s initialized for motor %s", pwm_a.channel, pwm_a.dev->name, "A");
+    // TODO: REMOVE!!!!!
+
+    // // const struct pwm_dt_spec controller_pwm = PWM_DT_SPEC_GET(DT_NODELABEL(motor_port0));
+    // // err = !device_is_ready(controller_pwm.dev);
+    // // if (err)
+    // // {
+    // //     LOG_ERR("Controller PWM device not ready");
+    // //     return err;
+    // // }
+
+    // // pwm_set_pulse_dt(&controller_pwm, (5*PWM_USEC(500))/100);
+
+    // // gpio_pin_configure(fault_gpio.port, 31, GPIO_INPUT);
+
+    // err = !device_is_ready(motor_a);
+    // if (err)
+    // {
+    //     LOG_ERR("Motor a not ready: Error %d", err);
+    //     return err;
+    // }
+
+    // err = !device_is_ready(motor_b);
+    // if (err)
+    // {
+    //     LOG_ERR("Motor b not ready: Error %d", err);
+    //     return err;
+    // }
     return 0;
 }
 
