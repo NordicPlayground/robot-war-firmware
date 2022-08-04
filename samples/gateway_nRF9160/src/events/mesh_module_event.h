@@ -15,28 +15,39 @@
 #include <app_event_manager.h>
 #include <app_event_manager_profiler_tracer.h>
 
-#include "../../common/nRF9160dk_uart_interface/messages.h"
+// #include "bluetooth/mesh/vnd/robot_cli.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#define ID_CLI_MODEL_ID 0x000B
+#define MOVEMENT_CLI_MODEL_ID 0x000D
+
+#define BT_MESH_MODEL_OP_3(b0, cid) ((((b0) << 16) | 0xc00000) | (cid))
+#define BT_MESH_ID_OP_STATUS BT_MESH_MODEL_OP_3(0x0A, 0x0059)
+#define BT_MESH_MOVEMENT_OP_MOVEMENT_SET BT_MESH_MODEL_OP_3(0x0B, 0x0059)
+#define BT_MESH_MOVEMENT_OP_MOVEMENT_ACK BT_MESH_MODEL_OP_3(0x0C, 0x0059)
+#define BT_MESH_MOVEMENT_OP_READY_SET BT_MESH_MODEL_OP_3(0x0D, 0x0059)
+
 enum mesh_module_event_type {
     MESH_EVT_READY, // Mesh module is ready to use.
-	MESH_EVT_ROBOT_ADDED, // Robot added to network.
-    MESH_EVT_OP_STATUS, // Status of previous operation.
-    MESH_EVT_MOVEMENT_REPORTED, // Movement reported by robot.
-    MESH_EVT_MOVEMENT_CONFIG_ACCEPTED, // Movement configuration accepted by robot.
+	MESH_EVT_ROBOT_ID, // Robot added to network.
+	MESH_EVT_MOVEMENT_CONFIGURED, // Robot added to network.
+};
+
+/** Id status message parameters.  */
+struct bt_mesh_id_status {
+	/** static identity of device */
+	uint64_t id;
 };
 
 struct mesh_module_event {
     struct app_event_header header;
     enum mesh_module_event_type type;
+    uint16_t addr;
     union {
-        int status; // MESH_EVT_OP_STATUS: Status for previous operation.
-        struct mesh_uart_robot_added_data new_robot; // MESH_EVT_ROBOT_ADDED: Data about new robot.
-        struct mesh_uart_movement_reported_data movement_reported; // MESH_EVT_MOVEMENT_REPORTED: Data about actual movement reported by robot.
-        struct mesh_uart_movement_config movement_config; // MESH_EVT_MOVEMENT_CONFIG_ACCEPTED: Movement configuration accepted by robot.
+        struct bt_mesh_id_status robot_id; // MESH_EVT_ROBOT_ADDED: Data about new robot.
     } data;
 };
 

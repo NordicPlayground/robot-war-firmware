@@ -12,4 +12,5 @@ target_sources(app PRIVATE
 	cloud_module.c
 	robot_module.c
 	mesh_module.c
+	uart_module.c
 )

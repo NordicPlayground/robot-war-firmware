@@ -30,29 +30,23 @@ enum robot_module_event_type {
 };
 
 struct robot_led_cfg {
-	int r, g, b;
-	int time;
+	uint8_t r, g, b;
+	uint8_t time;
 };
 
-struct robot_cfg {
-	int rotation;
-	int drive_time;
-	int speed;
-	int revolutions;
-	struct robot_led_cfg led;
-};
-
-
-struct robot_data {
-	int addr;
-	struct robot_cfg *cfg;
+struct robot_movement_cfg {
+	uint32_t drive_time;
+	uint32_t rotation;
+	uint8_t speed;
 };
 
 struct robot_module_event {
 	struct app_event_header header;
 	enum robot_module_event_type type;
+	uint16_t addr;
 	union {
-		struct robot_data robot;
+		struct robot_movement_cfg *movement;
+		struct robot_led_cfg led;
 		char* str;
 		int err;
 	} data;

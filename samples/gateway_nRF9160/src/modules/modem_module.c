@@ -106,8 +106,10 @@ static bool app_event_handler(const struct app_event_header *aeh)
 
 static void lte_evt_handler(const struct lte_lc_evt *const evt)
 {
+	
 	switch (evt->type) {
 	case LTE_LC_EVT_NW_REG_STATUS: {
+		LOG_INF("evt->type %d", evt->nw_reg_status);
 		if (evt->nw_reg_status == LTE_LC_NW_REG_NOT_REGISTERED) {
 			SEND_EVENT(modem, MODEM_EVT_LTE_DISCONNECTED);
 			break;
@@ -140,7 +142,6 @@ static int lte_connect(void)
 	}
 
 	SEND_EVENT(modem, MODEM_EVT_LTE_CONNECTING);
-
 	return 0;
 }
 
