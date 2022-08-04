@@ -18,11 +18,39 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_APPLICATION_MODULE_LOG_LEVEL);
 
 #include "uart_handler.h"
 #include "model_handler.h"
-#include "robot_movement_cli.h"
 
-static const struct device *mesh_uart = DEVICE_DT_GET(DT_NODELABEL(uart1));
+static const struct device *uart = DEVICE_DT_GET(DT_NODELABEL(uart1));
 
-static struct bt_mesh_robot_config_cli *config_client;
+static void mesh_rx(uint8_t *data, uint8_t len, uint32_t type, uint16_t model_id, uint16_t addr)
+{
+	// LOG_INF("Received id, type: %d, len: %d, addr: %d",  type, len, addr);
+	// LOG_HEXDUMP_INF(data, len, "message:");
+	uart_send(uart, data, (uint32_t)len, (uint32_t)type, (uint32_t)model_id, (uint32_t)addr);
+}
+
+struct model_handlers mesh_handlers = {
+	.rx = mesh_rx,
+};
+
+
+static void uart_rx(const struct device *dev, uint8_t *data, uint8_t len, uint32_t type, uint16_t id, uint16_t addr)
+{
+	LOG_INF("Received uart message, type: %x, len: %x, id: %x",  type, len, id);
+	LOG_HEXDUMP_INF(data, len, "message:");
+	mesh_tx(data, len, type, id, addr);
+
+}
+
+static void uart_tx_done(const struct device *dev, const uint8_t *data, uint8_t len)
+{
+	// LOG_INF("Sent uart message, len: %d", len);
+	// LOG_HEXDUMP_INF(data, len, "message:");
+}
+
+struct uart_msg_handlers uart_handlers = {
+	.rx = uart_rx,
+	.tx_done = uart_tx_done,
+};
 
 static int setup_mesh()
 {
@@ -34,7 +62,7 @@ static int setup_mesh()
 		return err;
 	}
 	LOG_DBG("Bluetooth initialized");
-	err = bt_mesh_init(bt_mesh_dk_prov_init(), model_handler_init(&config_client));
+	err = bt_mesh_init(bt_mesh_dk_prov_init(), model_handler_init(&mesh_handlers));
 	if (err)
 	{
 		LOG_ERR("Failed to initialize mesh: Error %d", err);
@@ -70,7 +98,7 @@ void main(void)
 		return;
 	}
 
-	err = init_uart(mesh_uart, config_client);
+	err = init_uart(uart, &uart_handlers);
 	if (err)
 	{
 		LOG_ERR("Could not initialize UART: Error %d", err);
