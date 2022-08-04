@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
 #
 
+# rsource "src/models/Kconfig"
+
 menu "Gateway nRF52840"
 
 config GATEWAY_NRF52840_VERSION
@@ -22,11 +24,19 @@ config MESH_UART_RX_BUF_COUNT
 	int "UART RX buffer count"
 	default 4
 
-config UART_THREAD_STACK_SIZE
+config UART_RX_THREAD_STACK_SIZE
 	int "UART thread stack size"
 	default 2048
 
-config UART_THREAD_PRIORITY
+config UART_RX_THREAD_PRIORITY
+	int "UART thread priority"
+	default 5
+
+config UART_TX_THREAD_STACK_SIZE
+	int "UART thread stack size"
+	default 2048
+
+config UART_TX_THREAD_PRIORITY
 	int "UART thread priority"
 	default 5
 
