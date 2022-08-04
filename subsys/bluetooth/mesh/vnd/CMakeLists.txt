@@ -10,3 +10,5 @@ zephyr_library_include_directories(${NRF_ROBOT_DIR}/subsys/bluetooth/mesh)
 
 zephyr_library_sources_ifdef(CONFIG_BT_MESH_ID_SRV id_srv.c)
 zephyr_library_sources_ifdef(CONFIG_BT_MESH_ID_CLI id_cli.c)
+zephyr_library_sources_ifdef(CONFIG_BT_MESH_MOVEMENT_SRV movement_srv.c)
+zephyr_library_sources_ifdef(CONFIG_BT_MESH_MOVEMENT_CLI movement_cli.c)
