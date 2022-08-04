@@ -1,0 +1,28 @@
+#
+# Copyright (c) 2021 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+menu "Vendor models"
+
+menuconfig BT_MESH_ID_CLI
+	bool "Identity Client"
+	select BT_MESH_VENDOR_MODELS
+	help
+	  Enable Mesh Identity Client model.
+
+menuconfig BT_MESH_ID_SRV
+	bool "Identity Server"
+	select BT_MESH_VENDOR_MODELS
+	help
+	  Enable Mesh Identity Server model.
+
+config BT_MESH_ID_LEN
+	int "ength of id"
+	depends on BT_MESH_ID_SRV || BT_MESH_ID_CLI
+	default 6
+	help
+	  Length of identity data in bytes.
+
+endmenu
