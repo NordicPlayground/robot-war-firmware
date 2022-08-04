@@ -25,4 +25,16 @@ config BT_MESH_ID_LEN
 	help
 	  Length of identity data in bytes.
 
+menuconfig BT_MESH_MOVEMENT_SRV
+	bool "Movement Server"
+	select BT_MESH_VENDOR_MODELS
+	help
+	  Enable Mesh Movement Server model.
+
+menuconfig BT_MESH_MOVEMENT_CLI
+	bool "Movement Server"
+	select BT_MESH_VENDOR_MODELS
+	help
+	  Enable Mesh Movement Client model.
+
 endmenu
