@@ -14,7 +14,7 @@
 
 #define MODULE cloud_module
 
-#include "modules_common.h"
+// #include "modules_common.h"
 #include "modem_module_event.h"
 #include "robot_module_event.h"
 #include "cloud_module_event.h"

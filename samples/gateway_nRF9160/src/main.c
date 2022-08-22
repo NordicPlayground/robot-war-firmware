@@ -8,7 +8,6 @@
 #include <zephyr/logging/log.h>
 
 #define MODULE main
-#include "modules_common.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(MODULE);

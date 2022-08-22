@@ -10,7 +10,7 @@
 
 #define MODULE ui_module
 
-#include "modules_common.h"
+// #include "modules_common.h"
 #include "ui_module_event.h"
 
 #include <zephyr/logging/log.h>

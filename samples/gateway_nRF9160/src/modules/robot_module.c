@@ -13,7 +13,6 @@
 
 #define MODULE robot_module
 
-#include "modules_common.h"
 #include "robot_module_event.h"
 #include "cloud_module_event.h"
 #include "mesh_module_event.h"
