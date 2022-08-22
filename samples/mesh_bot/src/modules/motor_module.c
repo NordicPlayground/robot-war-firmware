@@ -187,9 +187,17 @@ static int on_state_turning(struct motor_msg_data *msg)
 
 static int on_state_moving(struct motor_msg_data *msg)
 {
+    static uint8_t revolution_report = 1;
+    if (is_motor_module_event((struct app_event_header *)(&msg->event.motor)))
+    {
+        if (msg->event.motor.type == MOTOR_EVT_MOVEMENT_DONE)
         {
-            return 0;
-        }
+            state_set(STATE_MOTOR_STANDBY);
+            struct motor_module_event *event = new_motor_module_event();
+            event->type = MOTOR_EVT_MOVEMENT_REPORT;
+            event->data.report.revolutions = revolution_report;
+            revolution_report++;
+            APP_EVENT_SUBMIT(event);
         }
     }
     return 0;

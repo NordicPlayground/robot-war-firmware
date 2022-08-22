@@ -9,6 +9,8 @@ static char *type_to_str(motor_module_event_type type)
         return "MOTOR_EVT_MOVEMENT_START";
     case MOTOR_EVT_MOVEMENT_DONE:
         return "MOTOR_EVT_MOVEMENT_DONE";
+    case MOTOR_EVT_MOVEMENT_REPORT:
+        return "MOTOR_EVT_MOVEMENT_REPORT";
     default:
         return "UNKNOWN";
     }
