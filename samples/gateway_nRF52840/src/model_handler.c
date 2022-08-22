@@ -64,6 +64,8 @@ static const struct bt_mesh_robot_cli_handlers robot_cb = {
 
 struct bt_mesh_robot_cli robot = BT_MESH_ROBOT_CLI_INIT(&robot_cb);
 
+struct bt_mesh_light_rgb_cli light_rgb;
+
 /* Composition */
 static struct bt_mesh_elem elements[] = {
     BT_MESH_ELEM(
@@ -73,7 +75,8 @@ static struct bt_mesh_elem elements[] = {
             BT_MESH_MODEL_HEALTH_SRV(&health_srv, &health_pub)
         ),
         BT_MESH_MODEL_LIST( 
-            BT_MESH_MODEL_ROBOT_CLI(&robot)
+            BT_MESH_MODEL_ROBOT_CLI(&robot),
+            BT_MESH_MODEL_LIGHT_RGB_CLI(&light_rgb)
         )
     )
 };
@@ -130,7 +133,36 @@ int mesh_tx(uint8_t *data, uint8_t len, uint32_t type, uint16_t model_id, uint16
             bt_mesh_robot_cli_ready_set(&robot, &ctx);
 		}
 	} break;
-	
+	case LIGHT_RGB_CLI_MODEL_ID:
+    {
+        if (type == BT_MESH_LIGHT_RGB_OP_RGB_SET) {
+            struct bt_mesh_light_rgb_set set;
+
+            struct bt_mesh_msg_ctx ctx = {
+                .addr = addr,
+                .app_idx = light_rgb.model->keys[0],
+                .send_ttl = BT_MESH_TTL_DEFAULT
+            };
+
+            uint8_t *set_ptr = (uint8_t*)&set;
+	        memcpy(set_ptr, data, sizeof(uint16_t));
+
+            set_ptr = set_ptr + sizeof(uint16_t);
+            data = data +  sizeof(uint16_t);
+            memcpy(set_ptr, data, sizeof(uint8_t));
+
+            set_ptr = set_ptr + sizeof(uint8_t);
+            data = data +  sizeof(uint8_t);
+            memcpy(set_ptr, data, sizeof(uint8_t));
+            
+            set_ptr = set_ptr + sizeof(uint8_t);
+            data = data +  sizeof(uint8_t);
+            memcpy(set_ptr, data, sizeof(uint8_t));
+
+            bt_mesh_light_rgb_cli_rgb_set(&light_rgb, &ctx, set);
+		}
+    } break;
+   
 	default:
 		break;
 	}
