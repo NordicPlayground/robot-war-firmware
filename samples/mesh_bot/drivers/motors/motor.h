@@ -2,7 +2,7 @@
 #include <zephyr.h>
 #include <device.h>
 
-typedef int (*drive_continous_t)(const struct device *dev, int32_t power);
+typedef int (*drive_continous_t)(const struct device *dev, uint8_t power_numerator, uint8_t power_denominator,  bool direction);
 
 typedef int (*set_position_t)(const struct device *dev, int position, int32_t power, bool hold);
 
@@ -24,13 +24,13 @@ struct motor_api
  *         -ENOTSUP if motor does not support continous rotation. 
  *         Other error codes are defined by the underlying driver.
  */
-static inline int drive_continous(const struct device *dev, int32_t power)
+static inline int motor_drive_continous(const struct device *dev, uint8_t power_numerator, uint8_t power_denominator,  bool direction)
 {
     const struct motor_api *api = (struct motor_api *)dev->api;
     if (api->drive_continous == NULL){
         return -ENOTSUP;
     }
-    return api->drive_continous(dev, power);
+    return api->drive_continous(dev, power_numerator, power_denominator, direction);
 }
 
 /**
@@ -47,7 +47,7 @@ static inline int drive_continous(const struct device *dev, int32_t power)
  *         -ENOTSUP if hold == true and the motor does not support holding the motor position.
  *         Other error codes are defined by the underlying driver.
  */
-static inline int set_position(const struct device *dev, int32_t position, int32_t power, bool hold)
+static inline int motor_set_position(const struct device *dev, int32_t position, int32_t power, bool hold)
 {
     const struct motor_api *api = (struct motor_api *)dev->api;
 
