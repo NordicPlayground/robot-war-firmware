@@ -11,10 +11,7 @@ static char *type_to_str(mesh_module_event_type type)
         case MESH_EVT_DISCONNECTED: {
             return "MESH_EVT_DISCONNECTED";
         }
-        case MESH_EVT_MOVEMENT_RECEIVED: {
-            return "MESH_EVT_MOVEMENT_RECEIVED";
-        }
-        case MESH_EVT_CLEAR_TO_MOVE_RECEIVED: {
+        case MESH_EVT_MOVE: {
             return "MESH_EVT_CLEAR_TO_MOVE_RECEIVED";
         }
         case MESH_EVT_RGB: {
