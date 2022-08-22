@@ -44,40 +44,6 @@ int bt_mesh_movement_cli_ready_set(struct bt_mesh_movement_cli *cli,
 	return bt_mesh_model_send(cli->model, ctx, &buf, NULL, NULL);
 }
 
-// struct bt_mesh_movement_set extract_movement(struct net_buf_simple *buf)
-// {
-// 	struct bt_mesh_movement_set mov_conf;
-//     mov_conf.time = net_buf_simple_pull_be32(buf);
-//     mov_conf.angle = net_buf_simple_pull_be32(buf);
-//     mov_conf.speed = net_buf_simple_pull_u8(buf);
-// 	return mov_conf;
-// }
-
-// static int handle_message_movement_set(struct bt_mesh_model *model, struct bt_mesh_msg_ctx *ctx,
-// 			  struct net_buf_simple *buf)
-// {
-// 	struct bt_mesh_movement_cli *cli = model->user_data;
-// 	struct bt_mesh_movement_set movement;
-// 	int err;
-
-// 	movement = extract_movement(buf);
-
-// 	if (cli->handlers->set) {
-// 		cli->handlers->set(cli, movement);
-// 	}
-
-// 	BT_MESH_MODEL_BUF_DEFINE(ack, BT_MESH_MOVEMENT_OP_MOVEMENT_ACK, sizeof(0));
-//     bt_mesh_model_msg_init(&ack, BT_MESH_MOVEMENT_OP_MOVEMENT_ACK);
-//     net_buf_simple_add_u8(&ack, 0);
-//     err = bt_mesh_model_send(model, ctx, &ack, NULL, NULL);
-//     if (err)
-//     {
-//         printk("Failed to send message ack (err %d)", err);
-//     }
-
-// 	return 0;
-// }
-
 static int handle_message_ack(struct bt_mesh_model *model, struct bt_mesh_msg_ctx *ctx,
 			  struct net_buf_simple *buf)
 {
