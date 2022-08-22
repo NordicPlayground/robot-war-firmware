@@ -17,6 +17,9 @@ static char *type_to_str(mesh_module_event_type type)
         case MESH_EVT_CLEAR_TO_MOVE_RECEIVED: {
             return "MESH_EVT_CLEAR_TO_MOVE_RECEIVED";
         }
+        case MESH_EVT_RGB: {
+            return "MESH_EVT_RGB";
+        }
     default:
         return "UNKNOWN";
     }

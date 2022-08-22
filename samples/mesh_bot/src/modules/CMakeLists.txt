@@ -11,4 +11,5 @@ target_sources(app PRIVATE
     mesh_module.c
     motor_module.c
     ui_module.c
+    led_module.c
 )
