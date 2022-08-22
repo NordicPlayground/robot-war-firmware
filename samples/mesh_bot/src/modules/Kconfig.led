@@ -1,0 +1,17 @@
+menuconfig LED_MODULE
+    bool "Led module"
+    default y
+    help
+      Enables led module.
+
+if LED_MODULE
+
+    config LED_THREAD_STACK_SIZE
+        int "Stack size for led module thread"
+        default 2048
+
+    module = LED_MODULE
+    module-str = Led module
+    source "subsys/logging/Kconfig.template.log_config"
+
+endif

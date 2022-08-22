@@ -161,6 +161,27 @@ static struct bt_mesh_robot_srv robot = {
     .handlers = &robot_cb,
 };
 
+
+static void handle_light_rgb_set (struct bt_mesh_light_rgb_srv *srv, 
+			struct bt_mesh_light_rgb_set *rgb) 
+{
+    struct mesh_module_event *event = new_mesh_module_event();
+    event->type = MESH_EVT_RGB;
+    event->data.rgb.red = rgb->red;
+    event->data.rgb.green = rgb->green;
+    event->data.rgb.blue = rgb->blue;
+    event->data.rgb.blink_time = rgb->blink_time;
+    APP_EVENT_SUBMIT(event);
+}
+
+static const struct bt_mesh_light_rgb_srv_handlers light_rgb_cb = {
+	.set = handle_light_rgb_set,
+};
+
+static struct bt_mesh_light_rgb_srv light_rgb = {
+    .handlers = &light_rgb_cb,
+};
+
 /* Composition */
 static struct bt_mesh_elem elements[] = {
     BT_MESH_ELEM(
@@ -170,7 +191,8 @@ static struct bt_mesh_elem elements[] = {
             BT_MESH_MODEL_HEALTH_SRV(&health_srv, &health_pub)
         ),
         BT_MESH_MODEL_LIST( 
-            BT_MESH_MODEL_ROBOT_SRV(&robot)
+            BT_MESH_MODEL_ROBOT_SRV(&robot),
+            BT_MESH_MODEL_LIGHT_RGB_SRV(&light_rgb)
         )
     )
 };
