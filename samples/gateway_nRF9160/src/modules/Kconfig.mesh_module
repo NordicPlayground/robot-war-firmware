@@ -10,6 +10,22 @@ config MESH_THREAD_STACK_SIZE
 	int "Mesh module thread stack size"
 	default 2048
 
+config UART_RX_THREAD_STACK_SIZE
+	int "UART thread stack size"
+	default 2048
+
+config UART_RX_THREAD_PRIORITY
+	int "UART thread priority"
+	default 5
+
+config UART_TX_THREAD_STACK_SIZE
+	int "UART thread stack size"
+	default 2048
+
+config UART_TX_THREAD_PRIORITY
+	int "UART thread priority"
+	default 5
+
 module = MESH_MODULE
 module-str = Mesh module
 source "subsys/logging/Kconfig.template.log_config"

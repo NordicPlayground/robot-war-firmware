@@ -18,7 +18,11 @@ static char *type_to_str(enum mesh_module_event_type type)
     case MESH_EVT_READY:
         return "MESH_EVT_READY";
     case MESH_EVT_ROBOT_ID:
-        return "MESH_EVT_ROBOT_ID";
+        return "MESH_EVT_ROBOT_ID"; 
+    case MESH_EVT_MOVEMENT_CONFIGURED:
+        return "MESH_EVT_MOVEMENT_CONFIGURED";
+    case MESH_EVT_TELEMETRY_REPORTED:
+        return "MESH_EVT_TELEMETRY_REPORTED";
     default:
         return "UNKNOWN";
     }
