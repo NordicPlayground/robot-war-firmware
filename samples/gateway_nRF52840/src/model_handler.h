@@ -10,6 +10,7 @@
 
 #include <zephyr/bluetooth/mesh.h>
 #include "bluetooth/mesh/vnd/robot_cli.h"
+#include "bluetooth/mesh/vnd/light_rgb_cli.h"
 
 #ifdef __cplusplus
 extern "C" {
