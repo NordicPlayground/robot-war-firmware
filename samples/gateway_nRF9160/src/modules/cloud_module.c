@@ -10,6 +10,7 @@
 #include <nrf_modem_at.h>
 #include <string.h>
 #include <qos.h>
+#include <net/socket.h>
 
 #define MODULE cloud_module
 
@@ -30,12 +31,15 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_CLOUD_MODULE_LOG_LEVEL);
 QOS_MESSAGE_TYPES_REGISTER(CLOUD_SHADOW_UPDATE);
 QOS_MESSAGE_TYPES_REGISTER(CLOUD_SHADOW_CLEAR);
 
+struct aws_iot_config aws_config;
+
+K_SEM_DEFINE(cloud_connected_sem, 0, 1);
 struct cloud_msg_data {
 	union {
 		struct cloud_module_event cloud;
 		struct modem_module_event modem;
 		struct robot_module_event robot;
-	} module;
+	} event;
 };
 
 /* Cloud module super states. */
@@ -74,12 +78,6 @@ static int connect_retries;
 
 K_MSGQ_DEFINE(msgq_cloud, sizeof(struct cloud_msg_data),
 	      CLOUD_QUEUE_ENTRY_COUNT, CLOUD_QUEUE_BYTE_ALIGNMENT);
-
-static struct module_data self = {
-	.name = "cloud",
-	.msg_q = &msgq_cloud,
-	.supports_shutdown = true,
-};
 
 /* Forward declarations. */
 static void connect_check_work_fn(struct k_work *work);
@@ -150,29 +148,30 @@ static bool app_event_handler(const struct app_event_header *aeh)
 
 	if (is_cloud_module_event(aeh)) {
 		struct cloud_module_event *evt = cast_cloud_module_event(aeh);
-		msg.module.cloud = *evt;
+		msg.event.cloud = *evt;
 		enqueue_msg = true;
 	}
 
 	if (is_modem_module_event(aeh)) {
 		struct modem_module_event *evt = cast_modem_module_event(aeh);
-		msg.module.modem = *evt;
+		msg.event.modem = *evt;
 		enqueue_msg = true;
 	}
 
 	if (is_robot_module_event(aeh)) {
 		struct robot_module_event *evt = cast_robot_module_event(aeh);
 
-		msg.module.robot = *evt;
+		msg.event.robot = *evt;
 		enqueue_msg = true;
 	}
 
-	if (enqueue_msg) {
-		int err = module_enqueue_msg(&self, &msg);
+	if (enqueue_msg)
+	{
+		int err = k_msgq_put(&msgq_cloud, &msg, K_NO_WAIT);
 
-		if (err) {
+		if (err)
+		{
 			LOG_ERR("Message could not be enqueued");
-			SEND_ERROR(cloud, CLOUD_EVT_ERROR, err);
 		}
 	}
 
@@ -183,15 +182,21 @@ static void cloud_event_handler(const struct aws_iot_evt *evt)
 {
 switch (evt->type) {
 	case AWS_IOT_EVT_CONNECTING: {
-		SEND_EVENT(cloud, CLOUD_EVT_CONNECTING);
+		struct cloud_module_event *event = new_cloud_module_event();
+    	event->type = CLOUD_EVT_CONNECTING;
+		APP_EVENT_SUBMIT(event);
 		} break;
-	case AWS_IOT_EVT_CONNECTED: {
-		SEND_EVENT(cloud, CLOUD_EVT_CONNECTED);
-		} break;
-	case AWS_IOT_EVT_READY:
+	case AWS_IOT_EVT_CONNECTED: 
 		break;
+	case AWS_IOT_EVT_READY: {
+		struct cloud_module_event *event = new_cloud_module_event();
+    	event->type = CLOUD_EVT_CONNECTED;
+		APP_EVENT_SUBMIT(event);
+		} break;
 	case AWS_IOT_EVT_DISCONNECTED: {
-		SEND_EVENT(cloud, CLOUD_EVT_DISCONNECTED);
+		struct cloud_module_event *event = new_cloud_module_event();
+    	event->type = CLOUD_EVT_DISCONNECTED;
+		APP_EVENT_SUBMIT(event);
 		} break;
 	case AWS_IOT_EVT_DATA_RECEIVED: {
 		
@@ -214,13 +219,11 @@ switch (evt->type) {
 				evt->data.message_id);
 		} else if (err) {
 			LOG_ERR("qos_message_remove, error: %d", err);
-			SEND_ERROR(cloud, CLOUD_EVT_ERROR, err);
 		}
 		} break;
 	case AWS_IOT_EVT_PINGRESP:
 		break;
 	case AWS_IOT_EVT_ERROR: {
-		SEND_ERROR(cloud, CLOUD_EVT_ERROR, evt->data.err);
 		} break;
 	default:
 		LOG_ERR("Unknown AWS IoT event type: %d", evt->type);
@@ -293,6 +296,8 @@ static int setup(void)
 		return err;
 	}
 
+	
+
 	return err;
 }
 
@@ -305,7 +310,6 @@ static void connect_cloud(void)
 
 	if (connect_retries > CONFIG_CLOUD_CONNECT_RETRIES) {
 		LOG_WRN("Too many failed cloud connection attempts");
-		SEND_ERROR(cloud, CLOUD_EVT_ERROR, -ENETUNREACH);
 		return;
 	}
 	/* The cloud will return error if cloud_wrap_connect() is called while
@@ -314,7 +318,7 @@ static void connect_cloud(void)
 	 * it is rather common that cloud_connect can be called under these
 	 * conditions.
 	 */
-	err = aws_iot_connect(NULL);
+	err = aws_iot_connect(&aws_config);
 	if (err) {
 		LOG_ERR("cloud_connect failed, error: %d", err);
 	}
@@ -324,7 +328,7 @@ static void connect_cloud(void)
 	LOG_INF("Cloud connection establishment in progress");
 	LOG_INF("New connection attempt in %d seconds if not successful",
 		backoff_sec);
-
+	k_sem_give(&cloud_connected_sem);
 	/* Start timer to check connection status after backoff */
 	k_work_reschedule(&connect_check_work, K_SECONDS(backoff_sec));
 }
@@ -364,7 +368,6 @@ static void add_qos_message(uint8_t *ptr, size_t len, uint8_t type,
 		LOG_WRN("Cannot add message, internal pending list is full");
 	} else if (err) {
 		LOG_ERR("qos_message_add, error: %d", err);
-		SEND_ERROR(cloud, CLOUD_EVT_ERROR, err);
 	}
 }
 
@@ -381,49 +384,65 @@ static void connect_check_work_fn(struct k_work *work)
 	}
 
 	LOG_DBG("Cloud connection timeout occurred");
-
-	SEND_EVENT(cloud, CLOUD_EVT_CONNECTION_TIMEOUT);
+	struct cloud_module_event *event = new_cloud_module_event();
+	event->type = CLOUD_EVT_CONNECTION_TIMEOUT;
+	APP_EVENT_SUBMIT(event);
 }
 
 /* Message handler for STATE_LTE_DISCONNECTED. */
 static void on_state_lte_disconnected(struct cloud_msg_data *msg)
 {
-	if ((IS_EVENT(msg, modem, MODEM_EVT_LTE_CONNECTED))) {
-		state_set(STATE_LTE_CONNECTED);
+	if (is_modem_module_event((struct app_event_header *)(&msg->event.modem)))
+    {
+        if (msg->event.modem.type == MODEM_EVT_LTE_CONNECTED)
+        {
+			state_set(STATE_LTE_CONNECTED);
 
-		/* LTE is now connected, cloud connection can be attempted */
-		connect_cloud();
+			/* LTE is now connected, cloud connection can be attempted */
+			connect_cloud();
+		}
 	}
 }
 
 /* Message handler for STATE_LTE_CONNECTED. */
 static void on_state_lte_connected(struct cloud_msg_data *msg)
-{
-	if (IS_EVENT(msg, modem, MODEM_EVT_LTE_DISCONNECTED)) {
-		sub_state_set(SUB_STATE_CLOUD_DISCONNECTED);
-		state_set(STATE_LTE_DISCONNECTED);
+{	
+	if (is_modem_module_event((struct app_event_header *)(&msg->event.modem)))
+    {
+        if (msg->event.modem.type == MODEM_EVT_LTE_DISCONNECTED)
+        {
+			sub_state_set(SUB_STATE_CLOUD_DISCONNECTED);
+			state_set(STATE_LTE_DISCONNECTED);
 
-		/* Explicitly disconnect cloud when you receive an LTE disconnected event.
-		 * This is to clear up the cloud library state.
-		 */
-		disconnect_cloud();
+			/* Explicitly disconnect cloud when you receive an LTE disconnected event.
+			* This is to clear up the cloud library state.
+			*/
+			disconnect_cloud();
+		}
 	}
 }
 
 /* Message handler for STATE_LTE_CONNECTED. */
 static void on_sub_state_cloud_disconnected(struct cloud_msg_data *msg)
 {
-	if (IS_EVENT(msg, cloud, CLOUD_EVT_CONNECTED)) {
-		sub_state_set(SUB_STATE_CLOUD_CONNECTED);
-		LOG_INF("Cloud connected");
+	if (is_cloud_module_event((struct app_event_header *)(&msg->event.cloud)))
+    {
+        if (msg->event.cloud.type == CLOUD_EVT_CONNECTED)
+        {
+			sub_state_set(SUB_STATE_CLOUD_CONNECTED);
+			LOG_INF("Cloud connected");
 
-		connect_retries = 0;
-		k_work_cancel_delayable(&connect_check_work);
-
+			connect_retries = 0;
+			k_work_cancel_delayable(&connect_check_work);
+		}
 	}
 
-	if (IS_EVENT(msg, cloud, CLOUD_EVT_CONNECTION_TIMEOUT)) {
-		connect_cloud();
+	if (is_cloud_module_event((struct app_event_header *)(&msg->event.cloud)))
+    {
+        if (msg->event.cloud.type == CLOUD_EVT_CONNECTION_TIMEOUT)
+        {
+			connect_cloud();
+		}
 	}
 }
 
@@ -432,55 +451,58 @@ static void on_sub_state_cloud_connected(struct cloud_msg_data *msg)
 {
 	int err = 0;
 
-	if (IS_EVENT(msg, robot, ROBOT_EVT_CLEAR_ALL)) {
-		add_qos_message("", strlen(""),
-				CLOUD_SHADOW_CLEAR,
-				QOS_FLAG_RELIABILITY_ACK_REQUIRED,
-				false);
-	}
-
-	if (IS_EVENT(msg, robot, ROBOT_EVT_REPORT)) {
-		// char *str = cloud_encode_add_robot(msg->module.robot.data.str);
-		add_qos_message(msg->module.robot.data.str, 
-				strlen(msg->module.robot.data.str),
+	if (is_robot_module_event((struct app_event_header *)(&msg->event.robot)))
+    {
+        if (msg->event.robot.type == ROBOT_EVT_REPORT)
+        {
+		// char *str = cloud_encode_add_robot(msg->event.robot.data.str);
+		add_qos_message(msg->event.robot.data.str, 
+				strlen(msg->event.robot.data.str),
 				CLOUD_SHADOW_UPDATE,
 				QOS_FLAG_RELIABILITY_ACK_REQUIRED,
 				false);
+		}
 	}
 
-	if (IS_EVENT(msg, cloud, CLOUD_EVT_SEND_QOS)) {
+	if (is_cloud_module_event((struct app_event_header *)(&msg->event.cloud)))
+    {
+        if (msg->event.cloud.type == CLOUD_EVT_SEND_QOS)
+        {
+			struct qos_payload *qos_payload = &msg->event.cloud.data.qos_msg.data;
 
-
-		struct qos_payload *qos_payload = &msg->module.cloud.data.qos_msg.data;
-
-		struct aws_iot_data message = {
-			.ptr = qos_payload->buf,
-			.len = qos_payload->len,
-			.message_id = msg->module.cloud.data.qos_msg.id,
-			.qos = MQTT_QOS_1_AT_LEAST_ONCE,
-			.topic.type = AWS_IOT_SHADOW_TOPIC_UPDATE,
-		};
-		LOG_DBG("Sending payload: %s", qos_payload->buf);
-		err = aws_iot_send(&message);
-		if (err) {
-			LOG_ERR("aws_iot_send, error: %d", err);
+			struct aws_iot_data message = {
+				.ptr = qos_payload->buf,
+				.len = qos_payload->len,
+				.message_id = msg->event.cloud.data.qos_msg.id,
+				.qos = MQTT_QOS_1_AT_LEAST_ONCE,
+				.topic.type = AWS_IOT_SHADOW_TOPIC_UPDATE,
+			};
+			LOG_DBG("Sending payload: %s", qos_payload->buf);
+			err = aws_iot_send(&message);
+			if (err) {
+				LOG_ERR("aws_iot_send, error: %d", err);
+			}
 		}
 	}
 	
-	if (IS_EVENT(msg, cloud, CLOUD_EVT_SEND_QOS_CLEAR)) {
-		struct qos_payload *qos_payload = &msg->module.cloud.data.qos_msg.data;
+	if (is_cloud_module_event((struct app_event_header *)(&msg->event.cloud)))
+    {
+        if (msg->event.cloud.type == CLOUD_EVT_SEND_QOS_CLEAR)
+        {
+			struct qos_payload *qos_payload = &msg->event.cloud.data.qos_msg.data;
 
-		struct aws_iot_data message = {
-			.ptr = qos_payload->buf,
-			.len = qos_payload->len,
-			.message_id = msg->module.cloud.data.qos_msg.id,
-			.qos = MQTT_QOS_1_AT_LEAST_ONCE,
-			.topic.type = AWS_IOT_SHADOW_TOPIC_DELETE,
-		};
+			struct aws_iot_data message = {
+				.ptr = qos_payload->buf,
+				.len = qos_payload->len,
+				.message_id = msg->event.cloud.data.qos_msg.id,
+				.qos = MQTT_QOS_1_AT_LEAST_ONCE,
+				.topic.type = AWS_IOT_SHADOW_TOPIC_DELETE,
+			};
 
-		err = aws_iot_send(&message);
-		if (err) {
-			LOG_ERR("aws_iot_send, error: %d", err);
+			err = aws_iot_send(&message);
+			if (err) {
+				LOG_ERR("aws_iot_send, error: %d", err);
+			}
 		}
 	}
 }
@@ -492,24 +514,16 @@ static void module_thread_fn(void)
 
 	LOG_INF("Cloud module thread started");
 
-	self.thread_id = k_current_get();
-
-	err = module_start(&self);
-	if (err) {
-		LOG_ERR("Failed starting module, error: %d", err);
-		SEND_ERROR(cloud, CLOUD_EVT_ERROR, err);
-	}
 
 	err = setup();
 	if (err) {
 		LOG_ERR("Failed setting up the cloud, error: %d", err);
-		SEND_ERROR(cloud, CLOUD_EVT_ERROR, err);
 	}
 
 	k_work_init_delayable(&connect_check_work, connect_check_work_fn);
 
 	while (true) {
-		module_get_next_msg(&self, &msg);
+		k_msgq_get(&msgq_cloud, &msg, K_FOREVER);
 
 		switch (state) {
 		case STATE_LTE_DISCONNECTED:
@@ -537,10 +551,62 @@ static void module_thread_fn(void)
 	}
 }
 
+static void aws_poll_thread_fn(void)
+{
+	int err;
+	LOG_INF("polling thread started");
+	k_sem_take(&cloud_connected_sem, K_FOREVER);
+	struct pollfd fds[] = {
+		{
+			.fd = aws_config.socket,
+			.events = POLLIN
+		}
+	};
+
+	while (true) {
+		err = poll(fds, ARRAY_SIZE(fds),4000);
+		if (err < 0) {
+			LOG_ERR("poll() returned an error: %d", err);
+			continue;
+		}
+
+		if (err == 0) {
+			aws_iot_ping();
+			continue;
+		}
+
+		if ((fds[0].revents & POLLIN) == POLLIN) {
+			aws_iot_input();
+		}
+
+		if ((fds[0].revents & POLLNVAL) == POLLNVAL) {
+			LOG_ERR("Socket error: POLLNVAL");
+			LOG_ERR("The AWS IoT socket was unexpectedly closed.");
+			return;
+		}
+
+		if ((fds[0].revents & POLLHUP) == POLLHUP) {
+			LOG_ERR("Socket error: POLLHUP");
+			LOG_ERR("Connection was closed by the AWS IoT broker.");
+			return;
+		}
+
+		if ((fds[0].revents & POLLERR) == POLLERR) {
+			LOG_ERR("Socket error: POLLERR");
+			LOG_ERR("AWS IoT broker connection was unexpectedly closed.");
+			return;
+		}
+	}
+}
+
 K_THREAD_DEFINE(cloud_module_thread, CONFIG_CLOUD_THREAD_STACK_SIZE,
 		module_thread_fn, NULL, NULL, NULL,
 		K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
 
+K_THREAD_DEFINE(aws_poll_thread, CONFIG_CLOUD_THREAD_STACK_SIZE,
+		aws_poll_thread_fn, NULL, NULL, NULL,
+		K_HIGHEST_APPLICATION_THREAD_PRIO, 0, 0);
+		
 APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE_EARLY(MODULE, cloud_module_event);
 APP_EVENT_SUBSCRIBE(MODULE, modem_module_event);
