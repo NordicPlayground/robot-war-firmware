@@ -1,9 +1,11 @@
 
 #include <zephyr.h>
 #include <app_event_manager.h>
+#include <devicetree.h>
+#include <device.h>
+#include <stdlib.h>
 
 #define MODULE motor
-#include "../events/module_state_event.h"
 #include "../events/mesh_module_event.h"
 #include "../events/motor_module_event.h"
 
