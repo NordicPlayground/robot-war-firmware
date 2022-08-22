@@ -28,11 +28,11 @@ struct bt_mesh_id_srv;
  *
  * @param[in] _srv Pointer to a @ref bt_mesh_id_srv instance.
  */
-#define BT_MESH_MODEL_ID_SRV(_srv)                                          \
-		BT_MESH_MODEL_VND_CB(CONFIG_BT_COMPANY_ID,      \
+#define BT_MESH_MODEL_ID_SRV(_srv)                  \
+		BT_MESH_MODEL_VND_CB(CONFIG_BT_COMPANY_ID,  \
 			ID_SRV_MODEL_ID,                      	\
-			BT_MESH_MODEL_NO_OPS, &(_srv)->pub,       \
-			BT_MESH_MODEL_USER_DATA(					\
+			BT_MESH_MODEL_NO_OPS, &(_srv)->pub,     \
+			BT_MESH_MODEL_USER_DATA(				\
 				struct bt_mesh_id_srv, _srv), 		\
 			&_bt_mesh_id_srv_cb)
 

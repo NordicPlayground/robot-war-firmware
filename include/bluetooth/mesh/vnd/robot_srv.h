@@ -11,6 +11,7 @@
 #include <bluetooth/mesh/vnd/robot.h>
 #include <bluetooth/mesh/vnd/id_srv.h>
 #include <bluetooth/mesh/vnd/movement_srv.h>
+#include <bluetooth/mesh/vnd/telemetry_srv.h>
 #include <zephyr/bluetooth/mesh/access.h>
 
 #ifdef __cplusplus
@@ -32,13 +33,14 @@ struct bt_mesh_robot_srv;
  */
 #define BT_MESH_MODEL_ROBOT_SRV(_srv)					\
 		BT_MESH_MODEL_ID_SRV(&(_srv)->id),  			\
-		BT_MESH_MODEL_MOVEMENT_SRV(&(_srv)->movement),  			\
+		BT_MESH_MODEL_MOVEMENT_SRV(&(_srv)->movement),  \
+		BT_MESH_MODEL_TELEMETRY_SRV(&(_srv)->telemetry),\
 		BT_MESH_MODEL_VND_CB(CONFIG_BT_COMPANY_ID,      \
 			ROBOT_SRV_MODEL_ID,                      	\
-			BT_MESH_MODEL_NO_OPS, &(_srv)->pub,       			\
+			BT_MESH_MODEL_NO_OPS, &(_srv)->pub,       	\
 			BT_MESH_MODEL_USER_DATA(					\
 				struct bt_mesh_robot_srv, _srv), 		\
-			&_bt_mesh_robot_srv_cb), 
+			&_bt_mesh_robot_srv_cb) 
 
 /** Bluetooth Mesh robot server model handlers. */
 struct bt_mesh_robot_srv_handlers {
@@ -57,6 +59,7 @@ struct bt_mesh_robot_srv_handlers {
 	 */
 	void (*const move)(struct bt_mesh_robot_srv *srv,
 					  struct bt_mesh_movement_set *movement);
+
 };
 
 /**
@@ -68,6 +71,8 @@ struct bt_mesh_robot_srv {
 	struct bt_mesh_id_srv id;
 	/** Light Level Server instance. */
 	struct bt_mesh_movement_srv movement;
+	/** Light Level Server instance. */
+	struct bt_mesh_telemetry_srv telemetry;
     /** Application handler functions. */
 	const struct bt_mesh_robot_srv_handlers * handlers;
 	/** Model entry. */
@@ -83,7 +88,8 @@ struct bt_mesh_robot_srv {
 	struct bt_mesh_tid_ctx prev_transaction;
 };
 
-void bt_mesh_robot_register_id(struct bt_mesh_id_status id);
+int bt_mesh_robot_report_telemetry(struct bt_mesh_robot_srv *srv,
+					  struct bt_mesh_telemetry_report telemetry);
 
 extern const struct bt_mesh_model_cb _bt_mesh_robot_srv_cb;
 
