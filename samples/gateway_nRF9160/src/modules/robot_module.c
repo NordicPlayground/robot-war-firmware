@@ -8,7 +8,6 @@
 #include <zephyr/device.h>
 #include <stdio.h>
 #include <stdbool.h>
-#include <cJSON.h>
 #include <sys/slist.h>
 #include <stdio.h>
 
@@ -38,11 +37,12 @@ enum robot_state {
 
 struct robot {
 	sys_snode_t node;
-	uint64_t id;
+	char id[13];
 	uint16_t addr;
 	enum robot_state state;
-	struct robot_movement_cfg movement;
-	struct robot_led_cfg led;
+	struct codec_movement movement;
+	uint8_t revolutions;
+	struct codec_led led;
 };
 
 static sys_slist_t robot_list;
@@ -53,8 +53,12 @@ struct robot_msg_data {
 		struct robot_module_event robot;
 		struct cloud_module_event cloud;
 		struct mesh_module_event mesh;
-	} module;
+	} event;
 };
+
+typedef void (robot_fn)(struct robot *robot);
+typedef void (robot_delta_fn)(struct robot *robot, const char *delta, size_t len);
+
 
 /* Robot module message queue. */
 #define ROBOT_QUEUE_ENTRY_COUNT		10
@@ -63,11 +67,7 @@ struct robot_msg_data {
 K_MSGQ_DEFINE(msgq_robot, sizeof(struct robot_msg_data),
 	      ROBOT_QUEUE_ENTRY_COUNT, ROBOT_QUEUE_BYTE_ALIGNMENT);
 
-static struct module_data self = {
-	.name = "robot",
-	.msg_q = &msgq_robot,
-	.supports_shutdown = true,
-};
+int version_prev = 0;
 
 /* Convenience functions used in internal state handling. */
 static char *state2str(enum state_type state)
@@ -96,421 +96,6 @@ static void state_set(enum state_type new_state)
 	state = new_state;
 }
 
-/* JSON functions */
-static bool has_shadow_update_been_handled(cJSON *root_obj)
-{
-	cJSON *version_obj;
-	static int version_prev;
-	bool retval = false;
-
-	version_obj = cJSON_GetObjectItem(root_obj, "version");
-	if (version_obj == NULL) {
-		/* No version number present in message. */
-		return false;
-	}
-
-	/* If the incoming version number is lower than or equal to the previous,
-	 * the incoming message is considered a retransmitted message and will be ignored.
-	 */
-
-	// LOG_INF("prev %d curr %d", version_prev, version_obj->valueint);
-	if (version_prev >= version_obj->valueint) {
-		retval = true;
-	}
-	
-	version_prev = version_obj->valueint;
-	
-	return retval;
-}
-
-static cJSON *json_object_decode(cJSON *obj, const char *str)
-{
-	return obj ? cJSON_GetObjectItem(obj, str) : NULL;
-}
-
-static cJSON *json_create_reported_object(cJSON *obj, char* str) 
-{
-	cJSON *root_obj = cJSON_CreateObject();
-	if (root_obj == NULL) {
-		return NULL;
-	}
-
-	cJSON *state_obj = cJSON_CreateObject();
-	if (state_obj == NULL) {
-		cJSON_Delete(root_obj);
-		return NULL;
-	} 
-
-	cJSON_AddItemToObject(root_obj, "state", state_obj);
-	cJSON *reported_obj = cJSON_CreateObject();
-	if (reported_obj == NULL) {
-		cJSON_Delete(root_obj);
-		return NULL;
-	} 
-	
-	cJSON_AddItemToObject(state_obj, "reported", reported_obj);
-
-
-	cJSON_AddItemToObject(reported_obj, str, obj);
-
-	return root_obj;
-}
-
-static cJSON *json_parse_root_object(const char *input, size_t input_len)
-{
-	cJSON *obj = NULL;
-	obj = cJSON_ParseWithLength(input, input_len);
-	if (obj == NULL) {
-		const char *error_ptr = cJSON_GetErrorPtr();
-		LOG_ERR("could not parse json object %s", error_ptr);
-		return NULL;
-	}
-
-	/* Verify that the incoming JSON string is an object. */
-	if (!cJSON_IsObject(obj)) {
-		LOG_ERR("incoming json string is not an object");
-		return NULL;
-	}
-
-	if (has_shadow_update_been_handled(obj)) {
-		LOG_ERR("shadow update has already been handled");
-		cJSON_Delete(obj);
-		return NULL;
-	}
-
-	return obj;
-}
-
-static cJSON *json_get_object_in_state(cJSON *root_obj, char *str) 
-{
-	cJSON *state_obj = NULL;
-	cJSON *desired_obj = NULL;
-	state_obj = cJSON_GetObjectItem(root_obj, "state");
-	if (state_obj == NULL) {
-		return NULL;
-	}
-
-	desired_obj = cJSON_GetObjectItem(state_obj, str);
-	if (desired_obj == NULL) {
-		return NULL;
-	}
-
-	return desired_obj;
-}
-
-static char* json_encode_add_robot_report(uint64_t id)
-{
-	char *msg;
-	char robot_addr[13];
-	cJSON *root_obj;
-
-	cJSON *robots_obj = cJSON_CreateObject();
-	if (robots_obj == NULL) {
-		return NULL;
-	} 
-	
-	cJSON *robot_obj = cJSON_CreateObject();
-	if (robot_obj == NULL) {
-		cJSON_Delete(robots_obj);
-		return NULL;
-	} 
-
-
-	sprintf(robot_addr, "%x", (uint32_t) ((id >> 16) & 0xffffffff));
-	sprintf(&robot_addr[4], "%x", (uint32_t) (id & 0xffffffff));
-	LOG_INF("robot_addr add one %s", robot_addr);
-
-	cJSON_AddItemToObject(robots_obj, robot_addr, robot_obj);
-	
-	root_obj = json_create_reported_object(robots_obj, "robots");
-
-	msg = cJSON_PrintUnformatted(root_obj);
-	cJSON_Delete(root_obj);
-	return msg;
-}
-
-static char* json_encode_remove_robot_report(uint64_t addr) 
-{
-	char *msg;
-	char robot_addr[13];
-	cJSON *root_obj;
-
-	cJSON *robots_obj = cJSON_CreateObject();
-	if (robots_obj == NULL) {
-		return NULL;
-	} 
-
-	cJSON *robot_obj = cJSON_CreateNull();
-	if (robot_obj == NULL) {
-		return NULL;
-	}  
-	
-	sprintf(robot_addr, "%x", (uint32_t) ((addr >> 32) & 0xffffffff));
-	sprintf(&robot_addr[4], "%x", (uint32_t) (addr & 0xffffffff));
-	cJSON_AddItemToObject(robots_obj, robot_addr, robot_obj);
-	
-	
-	root_obj = json_create_reported_object(robots_obj, "robots");
-
-	msg = cJSON_PrintUnformatted(root_obj);
-	cJSON_Delete(root_obj);
-	return msg;
-}
-
-static char* json_encode_robot_list_report(void)
-{
-	char *msg;
-	char robot_addr[13];
-	cJSON *root_obj;
-	cJSON *robot_obj;
-
-	cJSON *robots_obj = cJSON_CreateObject();
-	if (robots_obj == NULL) {
-		return NULL;
-	} 
-
-	struct robot *robot;
-	SYS_SLIST_FOR_EACH_CONTAINER(&robot_list, robot, node) {
-
-		robot_obj = cJSON_CreateObject();
-		if (robot_obj == NULL) {
-			cJSON_Delete(robots_obj);
-			return NULL;
-		}
-		
-		sprintf(robot_addr, "%x", (uint32_t) ((robot->id >> 16) & 0xffffffff));
-		sprintf(&robot_addr[4], "%x", (uint32_t) (robot->id & 0xffffffff));
-		LOG_INF("robot add list %s", robot_addr);
-		cJSON_AddItemToObject(robots_obj, robot_addr, robot_obj);
-	}
-
-	root_obj = json_create_reported_object(robots_obj, "robots");
-
-	msg = cJSON_PrintUnformatted(root_obj);
-	cJSON_Delete(root_obj);
-	return msg;
-}
-
-static char* json_encode_robot_movement_config_report(uint64_t addr)
-{
-	char *msg;
-	char robot_addr[13];
-	cJSON *root_obj;
-
-	cJSON *robots_obj = cJSON_CreateObject();
-	if (robots_obj == NULL) {
-		return NULL;
-	}
-
-	cJSON *robot_obj = cJSON_CreateObject();
-	if (robots_obj == NULL) {
-		return NULL;
-	} 
-
-
-
-	struct robot *robot;
-	SYS_SLIST_FOR_EACH_CONTAINER(&robot_list, robot, node) {
-		if (robot->addr == addr) {
-			break;
-		}
-	}
-
-	sprintf(robot_addr, "%x", (uint32_t) ((robot->id >> 16) & 0xffffffff));
-	sprintf(&robot_addr[4], "%x", (uint32_t) (robot->id & 0xffffffff));
-	cJSON_AddItemToObject(robots_obj, robot_addr, robot_obj);
-
-	if (!cJSON_AddNumberToObject(robot_obj, "driveTimeMs", robot->movement.drive_time)) {
-		LOG_ERR("unable to report drivetime config on robot addr %lld", addr);
-		return NULL;
-	}
-
-	if (!cJSON_AddNumberToObject(robot_obj, "angleDeg", robot->movement.rotation)) {
-		LOG_ERR("unable to report rotation config on robot addr %lld", addr);
-		return NULL;
-	}
-
-	if (!cJSON_AddNumberToObject(robot_obj, "speedPct", robot->movement.speed)) {
-		LOG_ERR("unable to report speed config on robot addr %lld", addr);
-		return NULL;
-	}
-
-	root_obj = json_create_reported_object(robots_obj, "robots");
-
-	msg = cJSON_PrintUnformatted(root_obj);
-	cJSON_Delete(root_obj);
-	return msg;
-}
-
-static char* json_encode_robot_led_config_report(uint64_t addr)
-{
-	char *msg;
-	char robot_addr[13];
-	cJSON *root_obj;
-	int led[4];
-
-	cJSON *robots_obj = cJSON_CreateObject();
-	if (robots_obj == NULL) {
-		return NULL;
-	}
-
-	cJSON *robot_obj = cJSON_CreateObject();
-	if (robots_obj == NULL) {
-		return NULL;
-	} 
-
-	sprintf(robot_addr, "%x", (uint32_t) ((addr >> 32) & 0xffffffff));
-	sprintf(&robot_addr[4], "%x", (uint32_t) (addr & 0xffffffff));
-	cJSON_AddItemToObject(robots_obj, robot_addr, robot_obj);
-
-	struct robot *robot;
-	SYS_SLIST_FOR_EACH_CONTAINER(&robot_list, robot, node) {
-		if (robot->addr == addr) {
-			break;
-		}
-	}
-
-	led[0] = robot->led.r;
-	led[1] = robot->led.g;
-	led[2] = robot->led.b;
-	led[3] = robot->led.time;
-
-	cJSON *led_obj = cJSON_CreateIntArray(led, 4);
-	if (!cJSON_AddItemToObject(robot_obj, "led", led_obj)) {
-		LOG_ERR("unable to report led config on robot addr %lld", addr);
-		return NULL;
-	};
-
-	root_obj = json_create_reported_object(robots_obj, "robots");
-
-	msg = cJSON_PrintUnformatted(root_obj);
-	cJSON_Delete(root_obj);
-	return msg;
-}
-
-// static char* json_encode_robot_revolution_count_list(void)
-// {
-// 	char *msg;
-// 	char robot_addr[13];
-// 	cJSON *root_obj;
-
-// 	cJSON *robots_obj = cJSON_CreateObject();
-// 	if (robots_obj == NULL) {
-// 		return NULL;
-// 	}
-
-// 	struct robot *robot;
-// 	SYS_SLIST_FOR_EACH_CONTAINER(&robot_list, robot, node) {
-// 		cJSON *robot_obj = cJSON_CreateObject();
-// 		if (robots_obj == NULL) {
-// 			return NULL;
-// 		} 
-
-// 		// sprintf(robot_addr, "%x", (uint32_t) ((robot->addr >> 32) & 0xffffffff));
-// 		// sprintf(&robot_addr[4], "%x", (uint32_t) (robot->addr & 0xffffffff));
-// 		cJSON_AddItemToObject(robots_obj, robot_addr, robot_obj);
-
-// 		if (!cJSON_AddNumberToObject(robot_obj, "revolutionCount", robot->movement.revolutions)) {
-// 			LOG_ERR("unable to report revolution count on robot addr %d", robot->addr);
-// 			return NULL;
-// 		}
-// 	}
-
-// 	root_obj = json_create_reported_object(robots_obj, "robots");
-
-// 	msg = cJSON_PrintUnformatted(root_obj);
-// 	cJSON_Delete(root_obj);
-// 	return msg;
-// }
-
-static int json_get_delta_robot_config(cJSON *root_obj)
-{
-	char robot_addr[13];
-	bool movement_config = false;
-
-	cJSON *robots_obj = NULL;
-	cJSON *robot_obj = NULL;
-	cJSON *value_obj = NULL;
-	cJSON *led_value_obj;
-	struct robot_module_event *event;
-
-	robots_obj = json_get_object_in_state(root_obj, "robots");
-	if (robots_obj == NULL) {
-		LOG_ERR("could not get robots object");
-		return -ENODATA;
-	}
-
-	struct robot *robot;
-	SYS_SLIST_FOR_EACH_CONTAINER(&robot_list, robot, node) {
-
-		sprintf(robot_addr, "%x", (uint32_t) ((robot->id >> 16) & 0xffffffff));
-		sprintf(&robot_addr[4], "%x", (uint32_t) (robot->id & 0xffffffff));
-		LOG_INF("get object item %s", robot_addr);
-		robot_obj = cJSON_GetObjectItem(robots_obj, robot_addr);
-		if (robots_obj == NULL) {
-			continue;
-		}
-
-		value_obj = json_object_decode(robot_obj, "driveTimeMs");
-		if(value_obj != NULL) {
-			robot->movement.drive_time = value_obj->valueint;
-			movement_config = true;
-		}
-
-		value_obj = json_object_decode(robot_obj, "angleDeg");
-		if(value_obj != NULL) {
-			robot->movement.rotation = value_obj->valueint;
-			movement_config = true;
-		}
-
-		value_obj = json_object_decode(robot_obj, "speedPct");
-		if(value_obj != NULL) {
-			robot->movement.speed = value_obj->valueint;
-			movement_config = true;
-		}
-
-		value_obj = json_object_decode(robot_obj, "led");
-		if(value_obj != NULL) {
-			led_value_obj = cJSON_GetArrayItem(value_obj, 0);
-			if(led_value_obj != NULL) {
-				robot->led.r = led_value_obj->valueint;
-			}
-
-			led_value_obj = cJSON_GetArrayItem(value_obj, 1);
-			if(led_value_obj != NULL) {
-				robot->led.g = led_value_obj->valueint;
-			}
-
-			led_value_obj = cJSON_GetArrayItem(value_obj, 2);
-			if(led_value_obj != NULL) {
-				robot->led.b = led_value_obj->valueint;
-			}
-
-			led_value_obj = cJSON_GetArrayItem(value_obj, 3);
-			if(led_value_obj != NULL) {
-				robot->led.time = led_value_obj->valueint;
-			}
-			event = new_robot_module_event();
-			event->type = ROBOT_EVT_LED_CONFIGURE;
-			event->addr = robot->addr;
-			event->data.led = robot->led;
-			APP_EVENT_SUBMIT(event);
-		}
-
-		if (movement_config) {
-			robot->state = ROBOT_STATE_CONFIGURING;
-
-			event = new_robot_module_event();
-			event->type = ROBOT_EVT_MOVEMENT_CONFIGURE;
-			event->addr = robot->addr;
-			event->data.movement = &robot->movement;
-			APP_EVENT_SUBMIT(event);
-		}
-	}
-
-	return 0;
-}
-
 /* Handlers */
 static bool app_event_handler(const struct app_event_header *aeh)
 {
@@ -519,262 +104,315 @@ static bool app_event_handler(const struct app_event_header *aeh)
 
 	if (is_robot_module_event(aeh)) {
 		struct robot_module_event *evt = cast_robot_module_event(aeh);
-		msg.module.robot = *evt;
+		msg.event.robot = *evt;
 		enqueue_msg = true;
 	}
 
 	if (is_cloud_module_event(aeh)) {
 		struct cloud_module_event *evt = cast_cloud_module_event(aeh);
-		msg.module.cloud = *evt;
+		msg.event.cloud = *evt;
 		enqueue_msg = true;
 	}
 
 	if (is_ui_module_event(aeh)) {
 		struct ui_module_event *evt = cast_ui_module_event(aeh);
 
-		msg.module.ui = *evt;
+		msg.event.ui = *evt;
 		enqueue_msg = true;
 	}
 
 	if (is_mesh_module_event(aeh)) {
 		struct mesh_module_event *evt = cast_mesh_module_event(aeh);
 
-		msg.module.mesh = *evt;
+		msg.event.mesh = *evt;
 		enqueue_msg = true;
 	}
 
-	if (enqueue_msg) {
-		int err = module_enqueue_msg(&self, &msg);
+	if (enqueue_msg)
+	{
+		int err = k_msgq_put(&msgq_robot, &msg, K_NO_WAIT);
 
-		if (err) {
+		if (err)
+		{
 			LOG_ERR("Message could not be enqueued");
-			SEND_ERROR(robot, ROBOT_EVT_ERROR, err);
 		}
 	}
 
 	return false;
 }
 
-/* Functions to report updates */
-static void report_robot_list(void) 
-{	
+/* Internal robot functions */
+static void set_led_event(struct robot *robot)
+{
+	struct robot_module_event *event = new_robot_module_event();
+	event->type = ROBOT_EVT_LED_CONFIGURE;
+	event->addr = robot->addr;
+	event->data.led = &robot->led;
+	APP_EVENT_SUBMIT(event);
+}
+
+static struct robot * add_robot(uint64_t id, uint16_t addr) 
+{
+	struct robot *robot;
+
+	robot = k_malloc(sizeof(struct robot));
+	sprintf(robot->id, "%x", (uint32_t) ((id >> 16) & 0xffffffff));
+	sprintf(&robot->id[4], "%x", (uint32_t) (id & 0xffffffff));
+	
+	robot->addr = addr;
+	robot->movement.drive_time = 0;
+	robot->movement.rotation = 0;
+	robot->movement.speed = 100;
+	robot->revolutions = 0;
+	robot->state = ROBOT_STATE_READY;
+
+	sys_slist_append(&robot_list, &robot->node);
+	return robot;
+}
+
+static struct robot* get_robot_by_addr(uint16_t addr)
+{
+	struct robot *robot;
+	SYS_SLIST_FOR_EACH_CONTAINER(&robot_list, robot, node) {
+		if (robot->addr == addr) {
+				return robot;
+		}
+	}
+	return NULL;
+}
+
+static void for_each_robot(robot_fn *func)
+{
+	struct robot *robot;
+	SYS_SLIST_FOR_EACH_CONTAINER(&robot_list, robot, node) {
+		if (func) {
+			func(robot);
+		}
+	}
+}
+
+static void report_event(char * report)
+{
 	struct robot_module_event *event = new_robot_module_event();
 	event->type = ROBOT_EVT_REPORT;
-	event->data.str = json_encode_robot_list_report();
+	event->data.str = report;
 	APP_EVENT_SUBMIT(event);
 }
 
 static void report_clear_robot_list(void) 
 {
-	struct robot_module_event *event = new_robot_module_event();
-	event->type = ROBOT_EVT_CLEAR_ALL;
-	APP_EVENT_SUBMIT(event);
+	report_event(codec_encode_remove_robots_report());
 }
 
-static void report_add_robot(uint64_t id) 
+static void report_robot_movement(struct robot *robot) 
+{
+	report_event(codec_encode_movement_report(robot->id, robot->movement));
+}
+
+static void report_robot_revolution_count(struct robot *robot) 
+{
+	LOG_INF("revolution count: %d", robot->revolutions);
+	report_event(codec_encode_revolution_count_report(robot->id, robot->revolutions));
+}
+
+static void report_robot(struct robot *robot) 
 {	
-	struct robot_module_event *event = new_robot_module_event();
-	event->type = ROBOT_EVT_REPORT;
-	event->data.str = json_encode_add_robot_report(id);
-	APP_EVENT_SUBMIT(event);
+	report_robot_movement(robot);
+	report_robot_revolution_count(robot);
+
 }
 
-static void report_remove_robot(uint64_t addr) 
-{	
-	struct robot_module_event *event = new_robot_module_event();
-	event->type = ROBOT_EVT_REPORT;
-	event->data.str = json_encode_remove_robot_report(addr);
-	APP_EVENT_SUBMIT(event);
-}
-
-static void report_robot_movement_config(uint64_t addr) 
-{	
-	struct robot_module_event *event = new_robot_module_event();
-	event->type = ROBOT_EVT_REPORT;
-	event->data.str = json_encode_robot_movement_config_report(addr);
-	APP_EVENT_SUBMIT(event);
-}
-
-static void report_robot_led_config(uint64_t addr) 
-{	
-	struct robot_module_event *event = new_robot_module_event();
-	event->type = ROBOT_EVT_REPORT;
-	event->data.str = json_encode_robot_led_config_report(addr);
-	APP_EVENT_SUBMIT(event);
-}
-
-// static void report_revolution_count_list(void) {
-// 	struct robot_module_event *event = new_robot_module_event();
-// 	event->type = ROBOT_EVT_REPORT;
-// 	event->data.str = json_encode_robot_revolution_count_list();
-// 	APP_EVENT_SUBMIT(event);
-// }
-
-// static void set_revolution_count(uint64_t addr, int revolutions) 
-// {
-// 	struct robot *robot;
-// 	SYS_SLIST_FOR_EACH_CONTAINER(&robot_list, robot, node) {
-// 		if (robot->addr == addr) {
-// 			robot->state = ROBOT_STATE_READY;
-// 			robot->movement.revolutions = revolutions;
-// 			break;
-// 		}
-// 	}
-
-// 	SYS_SLIST_FOR_EACH_CONTAINER(&robot_list, robot, node) {
-// 		if (robot->state != ROBOT_STATE_READY) {
-// 			return;
-// 		}
-// 	}
-
-// 	// report_revolution_count_list();
-// }
-
-static void set_state_configured(uint64_t addr) 
+static bool all_robots_are_in_state(enum robot_state state) 
 {
 	struct robot *robot;
 	SYS_SLIST_FOR_EACH_CONTAINER(&robot_list, robot, node) {
-		if (robot->addr == addr) {
-			robot->state = ROBOT_STATE_CONFIGURED;
-			break;
+		if (robot->state != state) {
+			return false;
 		}
 	}
-
-	SYS_SLIST_FOR_EACH_CONTAINER(&robot_list, robot, node) {
-		if (robot->state != ROBOT_STATE_CONFIGURED) {
-			return;
-		}
-	}
-
-	struct robot_module_event *clear_to_move_event = new_robot_module_event();
-	clear_to_move_event->type = ROBOT_EVT_CLEAR_TO_MOVE;
-	APP_EVENT_SUBMIT(clear_to_move_event);
+	return true;
 }
 
-/* Internal robot list functions */
-static int add_robot(uint64_t id, uint16_t addr) 
+static void process_delta_for_each_robot(robot_delta_fn *func, const char *delta, size_t len)
 {
 	struct robot *robot;
 	SYS_SLIST_FOR_EACH_CONTAINER(&robot_list, robot, node) {
-		if (robot->id == id) {
-			return 0;
+		if (func) {
+			func(robot, delta, len);
 		}
 	}
-	robot = k_malloc(sizeof(struct robot));
-	robot->addr = addr;
-	robot->id = id;
-	sys_slist_append(&robot_list, &robot->node);
-	return 1;
 }
 
-static void remove_robot(uint64_t id) 
+static void process_delta_led(struct robot *robot, const char *delta, size_t len) 
 {
-	struct robot *robot;
-	SYS_SLIST_FOR_EACH_CONTAINER(&robot_list, robot, node) {
-		if (robot->id == id) {
-			break;
-		}
-	}
-	sys_slist_find_and_remove(&robot_list, &robot->node);
+	struct codec_led led;
+	struct robot_module_event *event;
 
-	k_free(robot);
+	if(codec_decode_led(robot->id, delta, len, &led)) {
+		robot->led = led;
+		event = new_robot_module_event();
+		event->type = ROBOT_EVT_LED_CONFIGURE;
+		event->addr = robot->addr;
+		event->data.led = &robot->led;
+		APP_EVENT_SUBMIT(event);
+	}
 }
 
-static void clear_robot_list(void) {
-	sys_snode_t *node;
+static void process_delta_movement(struct robot *robot, const char *delta, size_t len) 
+{
+	struct codec_movement movement;
+	struct robot_module_event *event;
 
-	node = sys_slist_get(&robot_list);
-	while (node != NULL) {
-		k_free(CONTAINER_OF(node, struct robot, node));
-		node = sys_slist_get(&robot_list);
+	if(codec_decode_movement(robot->id, delta, len, &movement)) {
+		robot->movement = movement;
+		robot->movement.speed = 100;
+		LOG_INF("robot->movement.drive_time: %d", robot->movement.drive_time);
+
+		event = new_robot_module_event();
+		event->type = ROBOT_EVT_MOVEMENT_CONFIGURE;
+		event->addr = robot->addr;
+		event->data.movement = &robot->movement;
+		APP_EVENT_SUBMIT(event);
 	}
 }
 
 /* Message handler for STATE_CONFIGURING. */
 static void on_state_cloud_disconnected(struct robot_msg_data *msg)
 {
+	if (is_mesh_module_event((struct app_event_header *)(&msg->event.mesh)))
+    {
+        if (msg->event.mesh.type == MESH_EVT_ROBOT_ID)
+        {
+			LOG_INF("Robot id detected addr: %x, id %llx", msg->event.mesh.addr, msg->event.mesh.data.robot_id.id);
+			if(!get_robot_by_addr(msg->event.mesh.addr)) {
+				add_robot(msg->event.mesh.data.robot_id.id, msg->event.mesh.addr);
+				struct robot *robot = get_robot_by_addr(msg->event.mesh.addr);
+				robot->led.red = 0;
+				robot->led.green = 230;
+				robot->led.blue = 10;
+				robot->led.time = 500;
 
-	if (IS_EVENT(msg, mesh, MESH_EVT_ROBOT_ID)) {
-		LOG_INF("Robot id detected addr: %x, id %llx", msg->module.mesh.addr, msg->module.mesh.data.robot_id.id);
-		// LOG_HEXDUMP_INF(, 6, "id:");
-		add_robot(msg->module.mesh.data.robot_id.id, msg->module.mesh.addr);
+				set_led_event(robot);
+			}
+			
+		}
 	}
 
-	if (IS_EVENT(msg, cloud, CLOUD_EVT_CONNECTED)) {
+	if (is_cloud_module_event((struct app_event_header *)(&msg->event.cloud)))
+    {
+        if (msg->event.cloud.type == CLOUD_EVT_CONNECTED)
+        {
 			report_clear_robot_list();
-			report_robot_list();
+			// report_event(codec_encode_remove_robots_report());
+			for_each_robot(report_robot);
 
 			state_set(STATE_CLOUD_CONNECTED);
+		}
 	}
 }
 
 /* Message handler for STATE_EXECUTING. */
 static void on_state_cloud_connected(struct robot_msg_data *msg)
 {
-	if (IS_EVENT(msg, cloud, CLOUD_EVT_UPDATE_DELTA)) {
-		int err;
-		LOG_INF("delta updated");
-		cJSON *root_obj = json_parse_root_object(msg->module.cloud.data.pub_msg.ptr, 
-											msg->module.cloud.data.pub_msg.len);
-		if (root_obj == NULL) {
-			LOG_ERR("Root object could not be obtained");
-		}
+	if (is_cloud_module_event((struct app_event_header *)(&msg->event.cloud)))
+    {
+        if (msg->event.cloud.type == CLOUD_EVT_UPDATE_DELTA)
+        {
+			int version;
 
-		err = json_get_delta_robot_config(root_obj);
-		if (err) {
-			// LOG_ERR("could not get robot config %d", err);
-		} 
+			const char * delta = msg->event.cloud.data.pub_msg.ptr;
+			size_t len = msg->event.cloud.data.pub_msg.len;
 
-		cJSON_Delete(root_obj);
-	}
-
-	if (IS_EVENT(msg, cloud, CLOUD_EVT_DISCONNECTED)) {
-		state_set(STATE_CLOUD_DISCONNECTED);
-	}
-
-	if (IS_EVENT(msg, mesh, MESH_EVT_ROBOT_ID)) {
-		LOG_INF("Robot id detected addr: %x, id %llx", msg->module.mesh.addr, msg->module.mesh.data.robot_id.id);
-		// LOG_HEXDUMP_INF(, 6, "id:");
-		if(add_robot(msg->module.mesh.data.robot_id.id, msg->module.mesh.addr)) {
-			report_add_robot(msg->module.mesh.data.robot_id.id);
+			version = codec_decode_version(delta, len);
+			if (version_prev >= version) {
+				return;
+			}
+			version_prev = version;
+			process_delta_for_each_robot(process_delta_movement, delta, len);
+			process_delta_for_each_robot(process_delta_led, delta, len);
 		}
 	}
 
-	if (IS_EVENT(msg, mesh, MESH_EVT_MOVEMENT_CONFIGURED)) {
-		report_robot_movement_config(msg->module.mesh.addr); 
-		set_state_configured(msg->module.mesh.addr); 
+	if (is_cloud_module_event((struct app_event_header *)(&msg->event.cloud)))
+    {
+        if (msg->event.cloud.type == CLOUD_EVT_DISCONNECTED)
+        {
+			state_set(STATE_CLOUD_DISCONNECTED);
+		}
 	}
 
-	// if (IS_EVENT(msg, mesh, MESH_EVT_MOVEMENT_REPORTED)) {
-	// 	set_revolution_count(msg->module.mesh.data.movement_reported.addr, msg->module.mesh.data.movement_reported.yaw); 
-	// }
-}
+	if (is_mesh_module_event((struct app_event_header *)(&msg->event.mesh)))
+    {
+        if (msg->event.mesh.type == MESH_EVT_ROBOT_ID)
+        {
+			if(!get_robot_by_addr(msg->event.mesh.addr)) {
+				report_robot(add_robot(msg->event.mesh.data.robot_id.id, msg->event.mesh.addr));
+				struct robot *robot = get_robot_by_addr(msg->event.mesh.addr);
+				robot->led.red = 0;
+				robot->led.green = 230;
+				robot->led.blue = 10;
+				robot->led.time = 500;
 
-/* Message handler for all states. */
-static void on_all_states(struct robot_msg_data *msg)
-{ 
+				set_led_event(robot);
+			}
+		}
+	}
 
+	if (is_mesh_module_event((struct app_event_header *)(&msg->event.mesh)))
+    {
+        if (msg->event.mesh.type == MESH_EVT_MOVEMENT_CONFIGURED)
+        {
+			struct robot *robot = get_robot_by_addr(msg->event.mesh.addr);
+
+			report_robot_movement(robot);
+			robot->state = ROBOT_STATE_CONFIGURED;
+			robot->led.red = 230;
+			robot->led.green = 0;
+			robot->led.blue = 10;
+			robot->led.time = 150;
+
+			set_led_event(robot);
+
+			if (all_robots_are_in_state(ROBOT_STATE_CONFIGURED)) {
+				struct robot_module_event *clear_to_move_event = new_robot_module_event();
+				clear_to_move_event->type = ROBOT_EVT_CLEAR_TO_MOVE;
+				APP_EVENT_SUBMIT(clear_to_move_event);
+			}
+		}
+	}
+
+	if (is_mesh_module_event((struct app_event_header *)(&msg->event.mesh)))
+    {
+        if (msg->event.mesh.type == MESH_EVT_TELEMETRY_REPORTED)
+        {
+			struct robot *robot = get_robot_by_addr(msg->event.mesh.addr);
+			robot->revolutions = msg->event.mesh.data.report.revolutions;
+			robot->state = ROBOT_STATE_READY;
+
+			robot->led.red = 0;
+			robot->led.green = 230;
+			robot->led.blue = 10;
+			robot->led.time = 500;
+
+			set_led_event(robot);
+
+			if (all_robots_are_in_state(ROBOT_STATE_READY)) {
+				for_each_robot(report_robot_revolution_count);
+			}
+		}
+	}
 }
 
 static void module_thread_fn(void)
 {
-	int err;
 	struct robot_msg_data msg;
 
 	LOG_INF("Robot module thread started");
 
-	self.thread_id = k_current_get();
-
-	err = module_start(&self);
-	if (err) {
-		LOG_ERR("Failed starting module, error: %d", err);
-		SEND_ERROR(robot, ROBOT_EVT_ERROR, err);
-	}
-
 	sys_slist_init(&robot_list);
 
 	while (true) {
-		module_get_next_msg(&self, &msg);
+		k_msgq_get(&msgq_robot, &msg, K_FOREVER);
 
 		switch (state) {
 		case STATE_CLOUD_DISCONNECTED:
@@ -786,8 +424,6 @@ static void module_thread_fn(void)
 		default:
 			break;
 		}
-
-		on_all_states(&msg);
 	}
 }
 
@@ -800,3 +436,4 @@ APP_EVENT_SUBSCRIBE(MODULE, robot_module_event);
 APP_EVENT_SUBSCRIBE(MODULE, cloud_module_event);
 APP_EVENT_SUBSCRIBE(MODULE, ui_module_event);
 APP_EVENT_SUBSCRIBE(MODULE, mesh_module_event);
+// }
