@@ -6,7 +6,7 @@
 #include <zephyr/bluetooth/mesh/msg.h>
 #include <bluetooth/mesh/models.h>
 
-#include "bluetooth/mesh/vnd/robot_srv.h"
+
 
 #define MODULE mesh
 #include "../events/module_state_event.h"
@@ -88,7 +88,6 @@ static bool app_event_handler(const struct app_event_header *header)
 
     if (is_motor_module_event(header))
     {
-        LOG_DBG("Motor module event received");
         struct motor_module_event *evt = cast_motor_module_event(header);
         msg.event.motor = *evt;
         enqueue = true;
@@ -128,7 +127,6 @@ static struct bt_mesh_health_srv health_srv = {
 
 BT_MESH_HEALTH_PUB_DEFINE(health_pub, 0);
 
-
 static uint8_t * handle_robot_identify(struct bt_mesh_robot_srv *srv)
 {
     size_t count;
@@ -145,7 +143,6 @@ static uint8_t * handle_robot_identify(struct bt_mesh_robot_srv *srv)
 static void handle_robot_move (struct bt_mesh_robot_srv *srv,
 					  struct bt_mesh_movement_set *movement) 
 {
-    LOG_INF("MOVE ROBOT: time: %d, angle: %d, speed: %d", movement->time, movement->angle, movement->speed);
     struct mesh_module_event *event = new_mesh_module_event();
     event->type = MESH_EVT_MOVE;
     event->data.move.time = movement->time;
@@ -183,6 +180,21 @@ static struct bt_mesh_comp comp = {
     .elem = elements,
     .elem_count = ARRAY_SIZE(elements),
 };
+
+static void on_all_states(struct mesh_msg_data *msg)
+{
+    if (is_motor_module_event((struct app_event_header *)(&msg->event.motor)))
+    {
+        if (msg->event.motor.type == MOTOR_EVT_MOVEMENT_REPORT)
+        {
+            struct bt_mesh_telemetry_report telemetry = {
+                .revolutions = msg->event.motor.data.report.revolutions,
+            };
+            
+            bt_mesh_robot_report_telemetry(&robot, telemetry);
+        }
+    }
+}
 
 /* Setup */
 static int setup_mesh(void)
@@ -222,12 +234,15 @@ static int setup_mesh(void)
     return 0;
 }
 
+
+
 /* Module thread */
 static void module_thread_fn(void)
 {
-    LOG_DBG("Mesh module thread started");
+    // LOG_DBG("Mesh module thread started");
     struct mesh_msg_data msg;
-
+    // k_sleep(K_MSEC(200));
+    // LOG_DBG("Skjer");
     int err;
 
     err = setup_mesh();
@@ -257,6 +272,7 @@ static void module_thread_fn(void)
                 LOG_ERR("Unknown mesh module state %d", state);
             }
         }
+        on_all_states(&msg);
     }
 }
 
