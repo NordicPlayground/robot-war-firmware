@@ -19,8 +19,6 @@ extern "C" {
 
 struct bt_mesh_movement_cli;
 
-
-
 /** Bluetooth Mesh Movement Server model handlers. */
 struct bt_mesh_movement_cli_handlers {
 	/** @brief Handler for an ack message. 

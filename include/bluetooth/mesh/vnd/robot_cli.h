@@ -10,6 +10,7 @@
 #include <bluetooth/mesh/vnd/robot.h>
 #include <bluetooth/mesh/vnd/id_cli.h>
 #include <bluetooth/mesh/vnd/movement_cli.h>
+#include <bluetooth/mesh/vnd/telemetry_cli.h>
 #include <zephyr/bluetooth/mesh/access.h>
 
 #ifdef __cplusplus
@@ -39,9 +40,10 @@ struct bt_mesh_robot_cli;
  *
  * @param[in] _cli Pointer to a @ref bt_mesh_robot_cli instance.
  */
-#define BT_MESH_MODEL_ROBOT_CLI(_cli)                                          \
+#define BT_MESH_MODEL_ROBOT_CLI(_cli)      \
 		BT_MESH_MODEL_ID_CLI(&(_cli)->id), \
 		BT_MESH_MODEL_MOVEMENT_CLI(&(_cli)->movement), \
+		BT_MESH_MODEL_TELEMETRY_CLI(&(_cli)->telemetry), \
 		BT_MESH_MODEL_VND_CB(CONFIG_BT_COMPANY_ID,      \
 			ROBOT_CLI_MODEL_ID,                      	\
 			BT_MESH_MODEL_NO_OPS, &(_cli)->pub,       \
@@ -67,6 +69,14 @@ struct bt_mesh_robot_cli_handlers {
 	 * @param[in] addr Address of robot client.
 	 */
 	void (*const movement_configured)(struct bt_mesh_robot_cli *cli, struct bt_mesh_msg_ctx *ctx);
+
+	/** @brief Handler for robot acknowledgement of movement configuration.
+	 *
+	 * @param[in] cli Robot Server.
+	 * @param[in] addr Address of robot client.
+	 */
+	void (*const telemetry_reported)
+		(struct bt_mesh_robot_cli *cli, struct bt_mesh_telemetry_report report, struct bt_mesh_msg_ctx *ctx);
 };
 
 /**
@@ -78,6 +88,8 @@ struct bt_mesh_robot_cli {
 	struct bt_mesh_id_cli id;
 	/** Light Level Server instance. */
 	struct bt_mesh_movement_cli movement;
+	/** Light Level Server instance. */
+	struct bt_mesh_telemetry_cli telemetry;
     /** Application handler functions. */
 	const struct bt_mesh_robot_cli_handlers * handlers;
 	/** Model entry. */
