@@ -6,6 +6,18 @@
 
 menu "Vendor models"
 
+menuconfig BT_MESH_LIGHT_RGB_CLI
+	bool "Light RGB Client"
+	select BT_MESH_VENDOR_MODELS
+	help
+	  Enable Mesh Identity Client model.
+
+menuconfig BT_MESH_LIGHT_RGB_SRV
+	bool "Light RGB Server"
+	select BT_MESH_VENDOR_MODELS
+	help
+	  Enable Mesh Light RGB Server model.
+
 menuconfig BT_MESH_ID_CLI
 	bool "Identity Client"
 	select BT_MESH_VENDOR_MODELS
@@ -19,7 +31,7 @@ menuconfig BT_MESH_ID_SRV
 	  Enable Mesh Identity Server model.
 
 config BT_MESH_ID_LEN
-	int "ength of id"
+	int "Length of id"
 	depends on BT_MESH_ID_SRV || BT_MESH_ID_CLI
 	default 6
 	help
