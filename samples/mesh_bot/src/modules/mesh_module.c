@@ -9,7 +9,6 @@
 
 
 #define MODULE mesh
-#include "../events/module_state_event.h"
 #include "../events/motor_module_event.h"
 #include "../events/mesh_module_event.h"
 
