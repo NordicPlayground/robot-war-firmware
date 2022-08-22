@@ -37,11 +37,24 @@ menuconfig BT_MESH_MOVEMENT_CLI
 	help
 	  Enable Mesh Movement Client model.
 
+menuconfig BT_MESH_TELEMETRY_SRV
+	bool "Telemetry Server"
+	select BT_MESH_VENDOR_MODELS
+	help
+	  Enable Mesh Telemetry Server model.
+
+menuconfig BT_MESH_TELEMETRY_CLI
+	bool "Telemetry Server"
+	select BT_MESH_VENDOR_MODELS
+	help
+	  Enable Mesh Telemetry Client model.
+
 menuconfig BT_MESH_ROBOT_SRV
 	bool "Robot Server"
 	select BT_MESH_VENDOR_MODELS
 	select BT_MESH_ID_SRV
 	select BT_MESH_MOVEMENT_SRV
+	select BT_MESH_TELEMETRY_SRV
 	help
 	  Enable Mesh Robot Server model.
 
@@ -50,6 +63,7 @@ menuconfig BT_MESH_ROBOT_CLI
 	select BT_MESH_VENDOR_MODELS
 	select BT_MESH_ID_CLI
 	select BT_MESH_MOVEMENT_CLI
+	select BT_MESH_TELEMETRY_CLI
 	help
 	  Enable Mesh Robot Client model.
 

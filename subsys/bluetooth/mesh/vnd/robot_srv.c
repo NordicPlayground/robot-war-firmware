@@ -15,10 +15,11 @@ uint8_t *identity = NULL;
 
 static struct bt_mesh_movement_set movement_config;
 
-// void bt_mesh_robot_register_id(struct bt_mesh_id_status id) {
-// 	identity = id;
-// 	LOG_HEXDUMP_DBG(identity.id, identity.len, "registered in robot model:");
-// }
+int bt_mesh_robot_report_telemetry(struct bt_mesh_robot_srv *srv,
+					  struct bt_mesh_telemetry_report telemetry)
+{
+	return bt_mesh_telemetry_report(&srv->telemetry, telemetry);
+}
 
 static uint8_t * handle_identify(struct bt_mesh_id_srv *srv)
 {
@@ -88,12 +89,15 @@ static int bt_mesh_robot_srv_init(struct bt_mesh_model *model)
 	if (err) {
 		return err;
 	}
+		
+	err = bt_mesh_model_extend(model, srv->telemetry.model);
+	if (err) {
+		return err;
+	}
 
 	return bt_mesh_model_extend(model, srv->id.model);
 }
 
 const struct bt_mesh_model_cb _bt_mesh_robot_srv_cb = {
 	.init = bt_mesh_robot_srv_init,
-	// .start = bt_mesh_robot_srv_start,
-
 };
