@@ -8,7 +8,6 @@ target_include_directories(app PRIVATE .)
 target_sources(app PRIVATE
 	ui_module.c
 	modem_module.c
-	modules_common.c
 	cloud_module.c
 	robot_module.c
 	mesh_uart_module.c

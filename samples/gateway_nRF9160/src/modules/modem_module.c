@@ -10,7 +10,7 @@
 
 #define MODULE modem_module
 
-#include "modules_common.h"
+// #include "modules_common.h"
 #include "modem_module_event.h"
 #include "ui_module_event.h"
 
@@ -28,7 +28,7 @@ struct modem_msg_data {
 	union {
 		struct modem_module_event modem;
 		struct ui_module_event ui;
-	} module;
+	} event;
 };
 
 /* Modem module message queue. */
@@ -37,12 +37,6 @@ struct modem_msg_data {
 
 K_MSGQ_DEFINE(msgq_modem, sizeof(struct modem_msg_data),
 	      MODEM_QUEUE_ENTRY_COUNT, MODEM_QUEUE_BYTE_ALIGNMENT);
-
-static struct module_data self = {
-	.name = "modem",
-	.msg_q = &msgq_modem,
-	.supports_shutdown = true,
-};
 
 /* Convenience functions used in internal state handling. */
 static char *state2str(enum state_type state)
@@ -81,23 +75,24 @@ static bool app_event_handler(const struct app_event_header *aeh)
 
 	if (is_modem_module_event(aeh)) {
 		struct modem_module_event *evt = cast_modem_module_event(aeh);
-		msg.module.modem = *evt;
+		msg.event.modem = *evt;
 		enqueue_msg = true;
 	}
 
 	if (is_ui_module_event(aeh)) {
 		struct ui_module_event *evt = cast_ui_module_event(aeh);
 
-		msg.module.ui = *evt;
+		msg.event.ui = *evt;
 		enqueue_msg = true;
 	}
 
-	if (enqueue_msg) {
-		int err = module_enqueue_msg(&self, &msg);
+	if (enqueue_msg)
+	{
+		int err = k_msgq_put(&msgq_modem, &msg, K_NO_WAIT);
 
-		if (err) {
+		if (err)
+		{
 			LOG_ERR("Message could not be enqueued");
-			SEND_ERROR(modem, MODEM_EVT_ERROR, err);
 		}
 	}
 
@@ -109,9 +104,10 @@ static void lte_evt_handler(const struct lte_lc_evt *const evt)
 	
 	switch (evt->type) {
 	case LTE_LC_EVT_NW_REG_STATUS: {
-		LOG_INF("evt->type %d", evt->nw_reg_status);
 		if (evt->nw_reg_status == LTE_LC_NW_REG_NOT_REGISTERED) {
-			SEND_EVENT(modem, MODEM_EVT_LTE_DISCONNECTED);
+			struct modem_module_event *event = new_modem_module_event();
+			event->type = MODEM_EVT_LTE_DISCONNECTED;
+			APP_EVENT_SUBMIT(event);
 			break;
 		}
 
@@ -122,7 +118,9 @@ static void lte_evt_handler(const struct lte_lc_evt *const evt)
 
         LOG_INF("Connected to %s network",
              evt->nw_reg_status == LTE_LC_NW_REG_REGISTERED_HOME ? "home" : "roaming");
-		SEND_EVENT(modem, MODEM_EVT_LTE_CONNECTED);
+			struct modem_module_event *event = new_modem_module_event();
+			event->type = MODEM_EVT_LTE_CONNECTED;
+			APP_EVENT_SUBMIT(event);
 		break;
 	}
 	default:
@@ -140,8 +138,9 @@ static int lte_connect(void)
 
 		return err;
 	}
-
-	SEND_EVENT(modem, MODEM_EVT_LTE_CONNECTING);
+	struct modem_module_event *event = new_modem_module_event();
+	event->type = MODEM_EVT_LTE_CONNECTING;
+	APP_EVENT_SUBMIT(event);
 	return 0;
 }
 
@@ -159,14 +158,11 @@ static int setup(void)
 	err = lte_connect();
 	if (err) {
 		LOG_ERR("Failed connecting to LTE, error: %d", err);
-		SEND_ERROR(modem, MODEM_EVT_ERROR, err);
 		return err;
 	}
 
 	return err;
 }
-
-
 
 static int lte_disconnect(void)
 {
@@ -185,31 +181,37 @@ static int lte_disconnect(void)
 /* Message handler for STATE_DISCONNECTED. */
 static void on_state_disconnected(struct modem_msg_data *msg)
 {
-	if (IS_EVENT(msg, modem, MODEM_EVT_LTE_CONNECTING)) {
-		state_set(STATE_CONNECTING);
+	if (is_modem_module_event((struct app_event_header *)(&msg->event.modem)))
+    {
+        if (msg->event.modem.type == MODEM_EVT_LTE_CONNECTING)
+        {
+			state_set(STATE_CONNECTING);
+		}
 	}
 }
 
 /* Message handler for STATE_CONNECTING. */
 static void on_state_connecting(struct modem_msg_data *msg)
 {
-	if (IS_EVENT(msg, modem, MODEM_EVT_LTE_CONNECTED)) {
-		state_set(STATE_CONNECTED);
+	if (is_modem_module_event((struct app_event_header *)(&msg->event.modem)))
+    {
+        if (msg->event.modem.type == MODEM_EVT_LTE_CONNECTED)
+        {
+			state_set(STATE_CONNECTED);
+		}
 	}
 }
 
 /* Message handler for STATE_CONNECTED. */
 static void on_state_connected(struct modem_msg_data *msg)
 {
-	if (IS_EVENT(msg, modem, MODEM_EVT_LTE_DISCONNECTED)) {
-		state_set(STATE_DISCONNECTED);
+	if (is_modem_module_event((struct app_event_header *)(&msg->event.modem)))
+    {
+        if (msg->event.modem.type == MODEM_EVT_LTE_DISCONNECTED)
+        {
+			state_set(STATE_DISCONNECTED);
+		}
 	}
-}
-
-/* Message handler for all states. */
-static void on_all_states(struct modem_msg_data *msg)
-{
-
 }
 
 static void module_thread_fn(void)
@@ -218,22 +220,14 @@ static void module_thread_fn(void)
 	LOG_INF("Modem module thread started");
 	struct modem_msg_data msg;
 
-	self.thread_id = k_current_get();
-
-	err = module_start(&self);
-	if (err) {
-		LOG_ERR("Failed starting module, error: %d", err);
-		SEND_ERROR(modem, MODEM_EVT_ERROR, err);
-	}
-
 	err = setup();
 	if (err) {
 		LOG_ERR("Failed setting up the modem, error: %d", err);
-		SEND_ERROR(modem, MODEM_EVT_ERROR, err);
 	}
 
 	while (true) {
-		module_get_next_msg(&self, &msg);
+		// module_get_next_msg(&self, &msg);
+		k_msgq_get(&msgq_modem, &msg, K_FOREVER);
 
 		switch (state) {
 		case STATE_DISCONNECTED:
@@ -248,8 +242,6 @@ static void module_thread_fn(void)
 		default:
 			break;
 		}
-
-		on_all_states(&msg);
 	}
 }
 
