@@ -17,6 +17,7 @@ config MESH_ROBOT_VERSION_MAX_LEN
 rsource "src/events/Kconfig"
 rsource "src/modules/Kconfig"
 rsource "drivers/tb6612fng/Kconfig"
+rsource "drivers/stspin240/Kconfig"
 
 endmenu
 
