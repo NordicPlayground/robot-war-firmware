@@ -37,7 +37,6 @@ struct model_handlers {
 const struct bt_mesh_comp *model_handler_init(struct model_handlers *handlers);
 
 int mesh_tx(uint8_t *data, uint8_t len, uint32_t type, uint16_t model_id, uint16_t addr);
-int set_movement(uint16_t addr, uint32_t time, uint32_t rotation, uint8_t speed);
 
 #ifdef __cplusplus
 }
