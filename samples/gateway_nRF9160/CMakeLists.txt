@@ -26,9 +26,10 @@ target_sources(app PRIVATE
 
 include_directories(
     src
-    ../common/nRF9160dk_uart_interface
 )
 
+
+add_subdirectory(src/cloud)
 add_subdirectory(src/modules)
 add_subdirectory(src/events)
 
