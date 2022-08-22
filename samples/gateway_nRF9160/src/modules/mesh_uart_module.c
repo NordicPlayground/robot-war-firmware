@@ -10,13 +10,12 @@
 #include <zephyr/drivers/gpio.h>
 #include <string.h>
 
-#define MODULE uart_module
-#include "modules_common.h"
-#include "uart_module_event.h"
+#define MODULE mesh_module
 #include "mesh_module_event.h"
+#include "robot_module_event.h"
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(MODULE, CONFIG_UART_MODULE_LOG_LEVEL);
+LOG_MODULE_REGISTER(MODULE, CONFIG_MESH_MODULE_LOG_LEVEL);
 
 struct uart_msg_header {
     uint32_t len;
@@ -25,110 +24,35 @@ struct uart_msg_header {
 	uint32_t addr;
 };
 
-// struct uart_msg_header {
-//     uint8_t len;
-//     uint32_t type;
-// 	uint16_t addr;
-// };
-
 struct uart_msg {
     struct uart_msg_header header;
     uint8_t *data;
 };
 
-struct uart_msg_data
+struct mesh_msg_data
 {
-	union
-	{
-		struct uart_module_event uart;
-		struct mesh_module_event mesh;
-	} module;
+	union {
+		// struct uart_module_event uart;
+		struct robot_module_event robot;
+	} event;
 };
 
-/* Uart module message queue. */
-#define UART_QUEUE_ENTRY_COUNT		10
-#define UART_QUEUE_BYTE_ALIGNMENT	4
+/* Mesh module message queue. */
+#define MESH_QUEUE_ENTRY_COUNT		10
+#define MESH_QUEUE_BYTE_ALIGNMENT	4
 
-K_MSGQ_DEFINE(msgq_uart, sizeof(struct uart_msg_data),
-	      UART_QUEUE_ENTRY_COUNT, UART_QUEUE_BYTE_ALIGNMENT);
+K_MSGQ_DEFINE(msgq_mesh, sizeof(struct mesh_msg_data),
+	      MESH_QUEUE_ENTRY_COUNT, MESH_QUEUE_BYTE_ALIGNMENT);
 
+/* Uart module devices and static module data. */
 static uint8_t rx_buf[2];
 
 static struct k_fifo rx_fifo;
 static struct k_fifo tx_fifo;
 
-/* uart module super states. */
-static enum state_type {
-	STATE_UART_NOT_READY,
-	STATE_UART_READY,
-} state;
-
-/* Uart module devices and static module data. */
-static K_SEM_DEFINE(uart_tx_sem, 1, 1);
+static K_SEM_DEFINE(uart_tx_sem, 0, 1);
 
 static const struct device *uart = DEVICE_DT_GET(DT_NODELABEL(uart2));
-
-/* Convenience functions used in internal state handling. */
-static char *state2str(enum state_type state)
-{
-	switch (state)
-	{
-	case STATE_UART_NOT_READY:
-		return "STATE_UART_NOT_READY";
-	case STATE_UART_READY:
-		return "STATE_UART_READY";
-	default:
-		return "Unknown state";
-	}
-}
-
-static void state_set(enum state_type new_state)
-{
-	if (new_state == state)
-	{
-		LOG_DBG("State: %s", state2str(state));
-		return;
-	}
-
-	LOG_DBG("State transition %s --> %s",
-			state2str(state),
-			state2str(new_state));
-
-	state = new_state;
-}
-
-/* Event handlers */
-static bool app_event_handler(const struct app_event_header *aeh)
-{
-	struct uart_msg_data msg = {0};
-	bool enqueue_msg = false;
-
-	if (is_uart_module_event(aeh))
-	{
-		struct uart_module_event *evt = cast_uart_module_event(aeh);
-		msg.module.uart = *evt;
-		enqueue_msg = true;
-	}
-
-	if (is_mesh_module_event(aeh))
-	{
-		struct mesh_module_event *evt = cast_mesh_module_event(aeh);
-		msg.module.mesh = *evt;
-		enqueue_msg = true;
-	}
-
-	if (enqueue_msg)
-	{
-		int err = k_msgq_put(&msgq_uart, &msg, K_NO_WAIT);
-
-		if (err)
-		{
-			LOG_ERR("Message could not be enqueued");
-		}
-	}
-
-	return false;
-}
 
 int uart_send(const struct device *dev, uint8_t *data, uint32_t len, uint32_t type, uint32_t id, uint32_t addr)
 {
@@ -156,7 +80,7 @@ int uart_send(const struct device *dev, uint8_t *data, uint32_t len, uint32_t ty
 		memcpy(pos, data, len);
 	}
 
-	LOG_HEXDUMP_INF(msg, len + sizeof(struct uart_msg_header), "message:");
+	// LOG_HEXDUMP_INF(msg, len + sizeof(struct uart_msg_header), "message:");
 	k_fifo_put(&tx_fifo, msg);
 	
 	return 0;
@@ -297,52 +221,73 @@ static int init_uart()
 		LOG_ERR("Failed to set UART callback: Error %d", err);
 		return err;
 	}
-
-
-
 	uart_rx_enable(uart, &rx_buf[0], 1, SYS_FOREVER_US);
 	return 0;
 }
 
-/* Module state handlers. */
-// static void on_state_uart_ready(struct uart_msg_data *msg)
-// {
-// 	if (IS_EVENT(msg, uart, UART_EVT_RX)) {
-// 		k_free(msg->module.uart.data.rx.data);
-// 	}
-
-// 	if (IS_EVENT(msg, uart, UART_EVT_TX)) {
-// 		LOG_INF("sending!");
-// 		uart_send(uart, msg->module.uart.data.tx.data, 
-// 				msg->module.uart.data.tx.header.len,
-// 				msg->module.uart.data.tx.header.type,
-// 				msg->module.uart.data.tx.header.id,
-// 				msg->module.uart.data.tx.header.addr);
-// 	}
-// }
-
-static void on_all_states(struct uart_msg_data *msg)
+/* Event handlers */
+static bool app_event_handler(const struct app_event_header *aeh)
 {
-	if (IS_EVENT(msg, uart, UART_EVT_RX)) {
-		k_free(msg->module.uart.data.rx.data);
+	struct mesh_msg_data msg = {0};
+	bool enqueue_msg = false;
+
+	if (is_robot_module_event(aeh))
+	{
+		struct robot_module_event *evt = cast_robot_module_event(aeh);
+		msg.event.robot = *evt;
+		enqueue_msg = true;
 	}
 
-	if (IS_EVENT(msg, uart, UART_EVT_TX)) {
-		LOG_INF("msg->module.uart.data.tx.data %p", msg->module.uart.data.tx.data);
-		LOG_HEXDUMP_INF((uint8_t*)(msg->module.uart.data.tx.data), msg->module.uart.data.tx.header.len, "payload:");
-		uart_send(uart, (uint8_t*)msg->module.uart.data.tx.data, 
-				msg->module.uart.data.tx.header.len,
-				msg->module.uart.data.tx.header.type,
-				msg->module.uart.data.tx.header.id,
-				msg->module.uart.data.tx.header.addr);
+	if (enqueue_msg)
+	{
+		int err = k_msgq_put(&msgq_mesh, &msg, K_NO_WAIT);
+
+		if (err)
+		{
+			LOG_ERR("Message could not be enqueued");
+		}
+	}
+
+	return false;
+}
+
+static void on_all_states(struct mesh_msg_data *msg)
+{
+	if (is_robot_module_event((struct app_event_header *)(&msg->event.robot)))
+    {
+		if (msg->event.robot.type == ROBOT_EVT_MOVEMENT_CONFIGURE)
+        {	
+			uart_send(uart, (uint8_t*)msg->event.robot.data.movement, 9,
+					BT_MESH_MOVEMENT_OP_MOVEMENT_SET, MOVEMENT_CLI_MODEL_ID,
+					msg->event.robot.addr);
+		}
+	}
+
+	if (is_robot_module_event((struct app_event_header *)(&msg->event.robot)))
+    {
+		if (msg->event.robot.type == ROBOT_EVT_CLEAR_TO_MOVE)
+        {	
+			uart_send(uart, NULL, 0, BT_MESH_MOVEMENT_OP_READY_SET, 
+				MOVEMENT_CLI_MODEL_ID, 0xFFFF);
+		}
+	}
+	
+	if (is_robot_module_event((struct app_event_header *)(&msg->event.robot)))
+    {
+		if (msg->event.robot.type == ROBOT_EVT_LED_CONFIGURE)
+        {	
+			LOG_INF("LED event!");
+			uart_send(uart, (uint8_t*)msg->event.robot.data.led, 5,
+					BT_MESH_LIGHT_RGB_OP_RGB_SET, LIGHT_RGB_CLI_MODEL_ID,
+					msg->event.robot.addr);
+		}
 	}
 }
 
 static void module_thread_fn(void)
 {
-	LOG_INF("Uart module thread started");
-	state_set(STATE_UART_NOT_READY);
-
+	LOG_INF("Mesh module thread started");
+	
 	int err = init_uart();
 	if (err)
 	{
@@ -351,22 +296,10 @@ static void module_thread_fn(void)
 	}
 	LOG_DBG("UART initialized");
 
-	struct uart_msg_data msg = {0};
+	struct mesh_msg_data msg = {0};
 	while (true)
 	{
-		k_msgq_get(&msgq_uart, &msg, K_FOREVER);
-
-		// switch (state)
-		// {
-		// case STATE_UART_READY:
-		// {
-		// 	on_state_uart_ready(&msg);
-		// 	break;
-		// }
-		// default:
-		// 	break;
-		// }
-
+		k_msgq_get(&msgq_mesh, &msg, K_FOREVER);
 		on_all_states(&msg);
 	}
 }
@@ -376,19 +309,46 @@ static void uart_rx_thread_fn(void *arg1, void *arg2, void *arg3)
 	LOG_DBG("Starting UART rx thread");
 	struct uart_msg *msg;
 	k_fifo_init(&rx_fifo);
-	// const struct device *dev = (const struct device *)arg1;
-	// struct uart_msg_handlers *handlers = (struct uart_msg_handlers *)arg2;
+	struct mesh_module_event *event;
 	while (true)
 	{
 		msg = k_fifo_get(&rx_fifo, K_FOREVER);
-		struct uart_module_event *event = new_uart_module_event();
-		event->type = UART_EVT_RX;
-		event->data.rx.header.len = msg->header.len;
-		event->data.rx.header.type = msg->header.type;
-		event->data.rx.header.id = msg->header.id;
-		event->data.rx.header.addr = msg->header.addr;
-		event->data.rx.data = msg->data;
+		event = new_mesh_module_event();
+		switch (msg->header.id)
+		{
+		case ID_CLI_MODEL_ID:
+			if(msg->header.type == BT_MESH_ID_OP_STATUS)
+			{
+				event->type = MESH_EVT_ROBOT_ID;
+				struct bt_mesh_id_status id;
+				memcpy((void*)&id.id, msg->data, 6);
+				event->data.robot_id = id;
+				event->addr = msg->header.addr;
+			} 
+			break;
+		case MOVEMENT_CLI_MODEL_ID:
+			if(msg->header.type == BT_MESH_MOVEMENT_OP_MOVEMENT_ACK)
+			{
+				event->type = MESH_EVT_MOVEMENT_CONFIGURED;
+				event->addr = msg->header.addr;
+			} 
+			break;
+		case TELEMETRY_CLI_MODEL_ID:
+			if(msg->header.type == BT_MESH_TELEMETRY_OP_TELEMETRY_REPORT)
+			{
+				event->type = MESH_EVT_TELEMETRY_REPORTED;
+				event->addr = msg->header.addr;
+				struct bt_mesh_telemetry_report report;
+				memcpy((void*)&report.revolutions, msg->data, 1);
+				event->data.report = report;
+			}
+			break;		
+		default:
+			break;
+		}
+		
 		APP_EVENT_SUBMIT(event);
+
 		k_free(msg);
 	}
 }
@@ -418,18 +378,18 @@ static void uart_tx_thread_fn(void *arg1, void *arg2, void *arg3)
 	}
 }
 
-K_THREAD_DEFINE(uart_rx_thread, CONFIG_UART_THREAD_STACK_SIZE, 
-				uart_rx_thread_fn, NULL, NULL, NULL, 
-				CONFIG_UART_RX_THREAD_PRIORITY, 0, 0);
-
-K_THREAD_DEFINE(uart_tx_thread, CONFIG_UART_THREAD_STACK_SIZE, 
-				uart_tx_thread_fn, NULL, NULL, NULL, 
-				CONFIG_UART_TX_THREAD_PRIORITY, 0, 0);
-
-K_THREAD_DEFINE(uart_module_thread, CONFIG_UART_THREAD_STACK_SIZE,
+K_THREAD_DEFINE(mesh_module_thread, CONFIG_MESH_THREAD_STACK_SIZE,
 				module_thread_fn, NULL, NULL, NULL,
 				K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
 
+K_THREAD_DEFINE(uart_rx_thread, CONFIG_UART_RX_THREAD_STACK_SIZE, 
+				uart_rx_thread_fn, NULL, NULL, NULL, 
+				CONFIG_UART_RX_THREAD_PRIORITY, 0, 0);
+
+K_THREAD_DEFINE(uart_tx_thread, CONFIG_UART_TX_THREAD_STACK_SIZE, 
+				uart_tx_thread_fn, NULL, NULL, NULL, 
+				CONFIG_UART_TX_THREAD_PRIORITY, 0, 0);
+
 APP_EVENT_LISTENER(MODULE, app_event_handler);
-APP_EVENT_SUBSCRIBE(MODULE, mesh_module_event);
-APP_EVENT_SUBSCRIBE_FINAL(MODULE, uart_module_event);
+APP_EVENT_SUBSCRIBE(MODULE, robot_module_event);
+APP_EVENT_SUBSCRIBE(MODULE, uart_module_event);

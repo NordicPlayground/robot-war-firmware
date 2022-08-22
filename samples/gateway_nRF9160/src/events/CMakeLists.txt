@@ -10,5 +10,4 @@ target_sources(app PRIVATE
 	cloud_module_event.c
 	robot_module_event.c
 	mesh_module_event.c
-	uart_module_event.c
 )
