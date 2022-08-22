@@ -56,10 +56,17 @@ void handle_robot_movement_configured(struct bt_mesh_robot_cli *cli, struct bt_m
     app_handle_rx(&ack, sizeof(uint8_t), BT_MESH_MOVEMENT_OP_MOVEMENT_ACK, MOVEMENT_CLI_MODEL_ID, ctx->addr);
 }
 
+void handle_robot_telemetry_reported(struct bt_mesh_robot_cli *cli, struct bt_mesh_telemetry_report report, struct bt_mesh_msg_ctx *ctx) 
+{    
+	LOG_INF("telemetry reported from addr %x", ctx->addr);
+    app_handle_rx(&report, sizeof(struct bt_mesh_telemetry_report), BT_MESH_TELEMETRY_OP_TELEMETRY_REPORT, TELEMETRY_CLI_MODEL_ID, ctx->addr);
+}
+
 /* Vendor models */
 static const struct bt_mesh_robot_cli_handlers robot_cb = {
 	.id = handle_robot_id,
     .movement_configured = handle_robot_movement_configured,
+    .telemetry_reported = handle_robot_telemetry_reported,
 };
 
 struct bt_mesh_robot_cli robot = BT_MESH_ROBOT_CLI_INIT(&robot_cb);
