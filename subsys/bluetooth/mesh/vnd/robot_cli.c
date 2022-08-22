@@ -38,6 +38,21 @@ static const struct bt_mesh_movement_cli_handlers movement_cb = {
 	.ack = handle_ack,
 };
 
+static void handle_report(struct bt_mesh_telemetry_cli *cli, 
+						struct bt_mesh_msg_ctx *ctx, 
+						struct bt_mesh_telemetry_report telemetry) 
+{
+	struct bt_mesh_robot_cli *robot_cli = 
+		CONTAINER_OF(cli, struct bt_mesh_robot_cli, telemetry);
+	if (robot_cli->handlers->telemetry_reported) {
+		robot_cli->handlers->telemetry_reported(robot_cli, telemetry, ctx);
+	}
+}
+
+static const struct bt_mesh_telemetry_cli_handlers telemetry_cb = {
+	.report = handle_report,
+};
+
 static void handle_id(struct bt_mesh_id_cli *cli, struct bt_mesh_id_status id, struct bt_mesh_msg_ctx *ctx) 
 {
 	struct bt_mesh_robot_cli *robot_cli = 
@@ -64,8 +79,14 @@ static int bt_mesh_robot_cli_init(struct bt_mesh_model *model)
 	cli->pub.msg = &cli->pub_msg;
 	cli->id.handlers = &id_cb;
 	cli->movement.handlers = &movement_cb;
+	cli->telemetry.handlers = &telemetry_cb;
 
 	err = bt_mesh_model_extend(model, cli->movement.model);
+	if (err) {
+		return err;
+	}
+
+	err = bt_mesh_model_extend(model, cli->telemetry.model);
 	if (err) {
 		return err;
 	}
