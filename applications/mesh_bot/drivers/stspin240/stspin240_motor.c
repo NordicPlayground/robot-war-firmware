@@ -112,7 +112,7 @@ static int init_motor(const struct device *dev)
 #define INIT_STSPIN240_MOTOR(inst)                                      \
     static struct motor_conf conf_##inst = {                            \
         .phase_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, phase_gpios, {0}), \
-        .pwm = PWM_DT_SPEC_GET_BY_IDX(DT_INST(inst, DT_DRV_COMPAT), 0),\
+        .pwm = PWM_DT_SPEC_GET_BY_IDX(DT_INST(inst, DT_DRV_COMPAT), 0), \
     };                                                                  \
     static struct motor_data data_##inst = {};                          \
     DEVICE_DT_INST_DEFINE(                                              \
