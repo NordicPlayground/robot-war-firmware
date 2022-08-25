@@ -179,7 +179,7 @@ static int on_state_turning(struct motor_msg_data *msg)
         if (msg->event.motor.type == MOTOR_EVT_MOVEMENT_DONE)
         {
             state_set(STATE_MOTOR_MOVING);
-            drive_forward(movement.time, movement.speed);
+            drive_forward(movement.time, 100);
         }
     }
     return 0;

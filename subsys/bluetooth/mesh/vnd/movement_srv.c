@@ -39,7 +39,7 @@ static int handle_message_movement_set(struct bt_mesh_model *model, struct bt_me
     err = bt_mesh_model_send(model, ctx, &ack, NULL, NULL);
     if (err)
     {
-        printk("Failed to send message ack (err %d)", err);
+        LOG_INF("Failed to send message ack (err %d)", err);
     }
 
 	return 0;

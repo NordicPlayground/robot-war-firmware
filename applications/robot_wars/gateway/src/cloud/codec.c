@@ -7,6 +7,9 @@
 #include "errno.h"
 #include "codec.h"
 
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(cloud_codec, LOG_LEVEL_DBG);
+
 static cJSON *json_parse_root_object(const char *input, size_t len)
 {
 	cJSON *obj = NULL;
@@ -30,6 +33,7 @@ static cJSON *json_object_decode(cJSON *obj, const char *str)
 
 static cJSON *json_create_reported_object(cJSON *obj, char* str) 
 {
+	// LOG_INF("skjer");
 	cJSON *root_obj = cJSON_CreateObject();
 	if (root_obj == NULL) {
 		return NULL;
@@ -47,10 +51,17 @@ static cJSON *json_create_reported_object(cJSON *obj, char* str)
 		cJSON_Delete(root_obj);
 		return NULL;
 	} 
-	
+
+	cJSON *desired_obj = cJSON_CreateNull();
+	if (desired_obj == NULL) {
+		cJSON_Delete(root_obj);
+		return NULL;
+	} 
+	// LOG_INF("skjer2");
 	cJSON_AddItemToObject(state_obj, "reported", reported_obj);
+	cJSON_AddItemToObject(state_obj, "desired", desired_obj);
 
-
+	// LOG_INF("skjer2");
 	cJSON_AddItemToObject(reported_obj, str, obj);
 
 	return root_obj;
@@ -99,14 +110,16 @@ bool codec_decode_movement(char *id, const char *input, size_t len, struct codec
 	cJSON *value_obj;
     
     root_obj = json_parse_root_object(input, len);
+	
+	// LOG_INF("delta: %s", cJSON_Print(root_obj));
 	robots_obj = json_get_object_in_state(root_obj, "robots");
 	if (robots_obj == NULL) {
 		return movement_config;
 	}
 
-    robot_obj = cJSON_GetObjectItem(robots_obj, id);
-    if (robots_obj == NULL) {
-        return 0;
+    robot_obj = json_object_decode(robots_obj, id);
+    if (robot_obj == NULL) {
+        return movement_config;
     }
 
     value_obj = json_object_decode(robot_obj, "driveTimeMs");
@@ -121,11 +134,7 @@ bool codec_decode_movement(char *id, const char *input, size_t len, struct codec
         movement_config = true;
     }
 
-    // value_obj = json_object_decode(robot_obj, "speedPct");
-    // if (value_obj != NULL) {
-    //     movement->speed = value_obj->valueint;
-    //     movement_config = true;
-    // }
+
     cJSON_Delete(root_obj);
 
 	return movement_config;
@@ -147,8 +156,8 @@ bool codec_decode_led(char *id, const char *input, size_t len, struct codec_led 
 		return led_config;
 	}
 
-    robot_obj = cJSON_GetObjectItem(robots_obj, id);
-    if (robots_obj == NULL) {
+    robot_obj = json_object_decode(robots_obj, id);
+    if (robot_obj == NULL) {
         return led_config;
     }
     
@@ -212,6 +221,7 @@ char* codec_encode_movement_report(char *id, struct codec_movement movement)
 	cJSON_AddItemToObject(robots_obj, id, robot_obj);
 	root_obj = json_create_reported_object(robots_obj, "robots");
 	msg = cJSON_PrintUnformatted(root_obj);
+	// LOG_INF("movereport: %s", cJSON_Print(root_obj));
 	cJSON_Delete(root_obj);
 
 	return msg;
@@ -276,8 +286,9 @@ char* codec_encode_revolution_count_report(char *id, uint8_t revolutions)
     }
 
 	root_obj = json_create_reported_object(robots_obj, "robots");
-
+	
 	msg = cJSON_PrintUnformatted(root_obj);
+	// LOG_INF("revoreport: %s", cJSON_Print(root_obj));
 	cJSON_Delete(root_obj);
 	return msg;
 }

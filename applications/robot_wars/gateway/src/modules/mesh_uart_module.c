@@ -25,9 +25,16 @@ struct uart_msg_header {
 };
 
 struct uart_msg {
+	/** reserved for FIFO use. */
+	void *fifo_reserved;
     struct uart_msg_header header;
     uint8_t *data;
 };
+
+
+// struct uart_tx_msg {
+//     uint8_t *data;
+// };
 
 struct mesh_msg_data
 {
@@ -54,33 +61,77 @@ static K_SEM_DEFINE(uart_tx_sem, 0, 1);
 
 static const struct device *uart = DEVICE_DT_GET(DT_NODELABEL(uart2));
 
+// int uart_send(const struct device *dev, uint8_t *data, uint32_t len, uint32_t type, uint32_t id, uint32_t addr)
+// {
+// 	uint8_t *pos;
+// 	// uint8_t *msg_buf;
+// 	struct uart_tx_msg *msg = k_malloc(sizeof(struct uart_tx_msg));
+// 	if (!msg){
+// 		LOG_ERR("Unable to allocate msg");
+// 		return -ENOMEM;
+// 	}
+
+// 	uint8_t *msg_data = k_malloc(len + sizeof(struct uart_msg_header));
+// 	if (!data){
+// 		LOG_ERR("Unable to allocate msg data");
+// 		return -ENOMEM;
+// 	}
+
+// 	msg->data = msg_data;
+	
+// 	// msg_buf = (uint8_t*)msg;
+// 	pos = msg_data;
+// 	memcpy(pos, &len, sizeof(uint32_t));
+
+// 	pos += sizeof(uint32_t);
+// 	memcpy(pos, &type, sizeof(uint32_t));
+
+// 	pos += sizeof(uint32_t);
+// 	memcpy(pos, &id, sizeof(uint32_t));
+
+// 	pos += sizeof(uint32_t);
+// 	memcpy(pos, &addr, sizeof(uint32_t));
+
+// 	if (data != NULL) {
+// 		pos += sizeof(uint32_t);
+// 		memcpy(pos, data, len);
+// 	}
+// 	// LOG_INF("pointer send %p, len: %d", msg, *msg);
+
+// 	LOG_HEXDUMP_INF(msg->data, len + sizeof(struct uart_msg_header), "message:");
+// 	k_fifo_put(&tx_fifo, msg);
+	
+// 	return 0;
+// }
+
 int uart_send(const struct device *dev, uint8_t *data, uint32_t len, uint32_t type, uint32_t id, uint32_t addr)
 {
-	uint8_t *pos;
-	uint8_t *msg = k_malloc(len + sizeof(struct uart_msg_header));
+	// uint8_t *pos;
+	// uint8_t *msg_buf;
+	struct uart_msg *msg = k_malloc(sizeof(struct uart_msg));
 	if (!msg){
 		LOG_ERR("Unable to allocate msg");
 		return -ENOMEM;
 	}
 
-	pos = msg;
-	memcpy(pos, &len, sizeof(uint32_t));
-
-	pos = pos + sizeof(uint32_t);
-	memcpy(pos, &type, sizeof(uint32_t));
-
-	pos = pos + sizeof(uint32_t);
-	memcpy(pos, &id, sizeof(uint32_t));
-
-	pos = pos + sizeof(uint32_t);
-	memcpy(pos, &addr, sizeof(uint32_t));
-
-	if (data != NULL) {
-		pos = pos + sizeof(uint32_t);
-		memcpy(pos, data, len);
+	uint8_t *msg_data = k_malloc(len);
+	if (!msg_data){
+		LOG_ERR("Unable to allocate msg data");
+		return -ENOMEM;
 	}
 
-	// LOG_HEXDUMP_INF(msg, len + sizeof(struct uart_msg_header), "message:");
+	msg->header.addr = addr;
+	msg->header.id = id;
+	msg->header.len = len;
+	msg->header.type = type;
+	msg->data = msg_data;
+
+	if (data != NULL) {
+		memcpy(msg_data, data, len);
+	}
+	// LOG_INF("pointer send %p, len: %d", msg, msg->header.len);
+
+	// LOG_HEXDUMP_INF(msg->data, len, "message:");
 	k_fifo_put(&tx_fifo, msg);
 	
 	return 0;
@@ -98,6 +149,7 @@ static int uart_data_rx_rdy_handler(const struct device *dev, struct uart_event_
 	if (current_msg_len == 0) {
 		/* New message just started, read expected length and allocate data buffer */
 		expected_data_len = *(event_data.buf);
+		// LOG_INF("expected data len %d", expected_data_len);
 		
 		msg = (struct uart_msg *)k_malloc(sizeof(struct uart_msg));
 		if (!msg){
@@ -107,7 +159,7 @@ static int uart_data_rx_rdy_handler(const struct device *dev, struct uart_event_
 		if (!data){
 			LOG_ERR("Unable to allocate msg data buffer");
 		}
-		msg_buf = (uint8_t*)msg;
+		msg_buf = (uint8_t*)(&msg->header);
 		msg->data = data;
 	} 
 	if (current_msg_len < header_size) {
@@ -123,7 +175,7 @@ static int uart_data_rx_rdy_handler(const struct device *dev, struct uart_event_
 	if (current_msg_len == (expected_data_len + sizeof(struct uart_msg_header))) {
 		/* Mesagge is complete, add to fifo */
 		current_msg_len = 0;
-		k_fifo_put(&rx_fifo, msg_buf);
+		k_fifo_put(&rx_fifo, msg);
 		return 0;
 	}
 	
@@ -139,7 +191,7 @@ static void uart_callback(const struct device *dev, struct uart_event *event, vo
 	{
 	case UART_TX_DONE:
 	{
-		LOG_DBG("UART_TX_DONE: Sent %d bytes", event->data.tx.len);
+		// LOG_INF("UART_TX_DONE: Sent %d bytes", event->data.tx.len);
 		// if (handlers) {
 		// 	if (handlers->tx_done){
 		// 		handlers->tx_done(dev, event->data.tx.buf, event->data.tx.len);
@@ -151,7 +203,7 @@ static void uart_callback(const struct device *dev, struct uart_event *event, vo
 	}
 	case UART_TX_ABORTED:
 	{
-		LOG_ERR("UART_TX_ABORTED");
+		LOG_INF("UART_TX_ABORTED");
 		k_sem_give(&uart_tx_sem);
 		break;
 	}
@@ -257,6 +309,7 @@ static void on_all_states(struct mesh_msg_data *msg)
     {
 		if (msg->event.robot.type == ROBOT_EVT_MOVEMENT_CONFIGURE)
         {	
+			// LOG_INF("movement: time: %d, rotation %d, speed %d", msg->event.robot.data.movement->drive_time, msg->event.robot.data.movement->rotation, msg->event.robot.data.movement->speed);
 			uart_send(uart, (uint8_t*)msg->event.robot.data.movement, 9,
 					BT_MESH_MOVEMENT_OP_MOVEMENT_SET, MOVEMENT_CLI_MODEL_ID,
 					msg->event.robot.addr);
@@ -276,7 +329,7 @@ static void on_all_states(struct mesh_msg_data *msg)
     {
 		if (msg->event.robot.type == ROBOT_EVT_LED_CONFIGURE)
         {	
-			LOG_INF("LED event!");
+			// LOG_INF("LED event!");
 			uart_send(uart, (uint8_t*)msg->event.robot.data.led, 5,
 					BT_MESH_LIGHT_RGB_OP_RGB_SET, LIGHT_RGB_CLI_MODEL_ID,
 					msg->event.robot.addr);
@@ -300,6 +353,7 @@ static void module_thread_fn(void)
 	while (true)
 	{
 		k_msgq_get(&msgq_mesh, &msg, K_FOREVER);
+		
 		on_all_states(&msg);
 	}
 }
@@ -313,6 +367,7 @@ static void uart_rx_thread_fn(void *arg1, void *arg2, void *arg3)
 	while (true)
 	{
 		msg = k_fifo_get(&rx_fifo, K_FOREVER);
+		// LOG_INF("rx thread!");
 		event = new_mesh_module_event();
 		switch (msg->header.id)
 		{
@@ -348,7 +403,7 @@ static void uart_rx_thread_fn(void *arg1, void *arg2, void *arg3)
 		}
 		
 		APP_EVENT_SUBMIT(event);
-
+		k_free(msg->data);
 		k_free(msg);
 	}
 }
@@ -357,16 +412,25 @@ static void uart_tx_thread_fn(void *arg1, void *arg2, void *arg3)
 {
 	LOG_DBG("Starting UART tx thread");
 	int err;
-	uint8_t *msg;
+	// uint8_t *msg;
+	struct uart_msg *msg;
 	size_t size;
+	uint8_t *uart_packet;
 
 	k_fifo_init(&tx_fifo);
 	while (true)
 	{
 		msg = k_fifo_get(&tx_fifo, K_FOREVER);
-		size = *msg + sizeof(struct uart_msg_header);
+		size = msg->header.len + sizeof(struct uart_msg_header);
+		uart_packet = k_malloc(msg->header.len + sizeof(struct uart_msg_header));
+		memcpy(uart_packet, &msg->header, sizeof(struct uart_msg_header));
+		memcpy(uart_packet + sizeof(struct uart_msg_header), msg->data, msg->header.len);
+		// k_free(msg);
+		// size = *msg->data + sizeof(struct uart_msg_header);
+		// LOG_INF("pointer thread %p, data %p", msg, msg->data);
+		LOG_HEXDUMP_INF(uart_packet, size, "tx message:");
 
-		err = uart_tx(uart, msg, size, SYS_FOREVER_US);
+		err = uart_tx(uart, uart_packet, size, SYS_FOREVER_US);
 		if (err){
 			LOG_ERR("Failed to send data: Error %d", err);
 		}
@@ -375,6 +439,9 @@ static void uart_tx_thread_fn(void *arg1, void *arg2, void *arg3)
 		if (err){
 			LOG_ERR("Failed to take semaphore: Error %d", err);
 		}
+		
+		k_free(msg->data);
+		k_free(msg);
 	}
 }
 
