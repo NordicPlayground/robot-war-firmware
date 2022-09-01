@@ -1,7 +1,7 @@
 # nRF Robot war firmware modules
 
 
-## Gateway nRF9160
+## Gateway (nRF9160)
 AWS IoT device. Has two main tasks:
 - Receive desired state from the cloud and translate it into robot operations.
 - Track and report robot state and operation status.
@@ -25,7 +25,7 @@ AWS IoT device. Has two main tasks:
 - Forward operations to gateway nRF52840
 - Report messages from gateway nRF52840
 
-## Gateway nRF52840
+## Gateway Bridge (nRF52840)
 Acts as BTLE radio for nRF9160.
 
 ### UART
@@ -39,7 +39,7 @@ Acts as BTLE radio for nRF9160.
 - Report status messages from robot
 - Listen for new robots
 
-## Robot nRF52840
+## Robot (nRF52840)
 Controls and individual robot. Handles mesh communication and execution of robot operations.
 ### Mesh
 - Define robot server model

@@ -10,24 +10,24 @@ This repository contains firmwares for both the gateway and the robots. Other re
 -------------------
 ## This repository
 
-The repo contains three separate firmwares which can be found in the [samples directory](/samples):
-- [gateway_nRF9160](/samples/gateway_nRF9160/)
+The repo contains three separate firmwares which can be found in the [applications/robot_wars directory](/applications/robot_wars/):
+- [gateway](/applications/robot_wars/gateway/)
   - Firmware for the nRF9160 in the gateway. Handles LTE connection, communication with AWS IoT, translating desired state from the device shadow into robot operations, and reporting robot state to AWS IoT.
   - Currently supports the following boards
     - ```nrf9160dk_nrf9160_ns``` Unsure if revision < 0.14.1 will work out of the box.
   
-- [gateway_nRF52840](/samples/gateway_nRF52840/)
+- [gateway_bridge](/applications/robot_wars/gateway_bridge/)
   - Firmware for the nRF52840 in the gateway. Receives robot operations from the gateway nRF9160 and sends them to the robots over Bluetooth mesh. Also receives messages from the mesh network and sends them to the gateway nRF9160.
     - Idealy this firmware would be replaced by the [HCI LPUART sample](https://developer.nordicsemi.com/nRF_Connect_SDK/doc/latest/nrf/samples/bluetooth/hci_lpuart/README.html) from nRF Connect SDK, but due to stability issues it is currently not an option.
   - Currently supports the following boards
     - ```nrf9160dk_nrf52840``` Unsure if revision < 0.14.1 will work out of the box.
 
-- [mesh_bot](/samples/mesh_bot/)
+- [robot](/applications/robot_wars/robot/)
   - Firmware for the nRF52840 controlling an individual robot. Receives commands from the mesh network, executes them, and reports back the results. 
   - Currently supports the following boards
     - ```nrf52840dk_nrf52840```
 
-The [samples directory](/samples/) also contains some definitions and data structures that are shared between the different firmwares. These can be found in the [samples/common](/samples/common/) directory.
+Common includes, primarily for defining mesh models, can be found in the [include directory](/include/).
 
 ## Documentation
 Most of the firmware documentation can be found in the [docs directory](/docs). This documentation includes:
