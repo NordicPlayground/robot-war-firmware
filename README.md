@@ -6,4 +6,4 @@ The nRF9160 SiP firmware is responsible for communicating with AWS over LTE. It 
 
 The nRF52840 SoC on the gateway is responsible for communicating directly with the robots over Bluetooth Mesh.
 
-The different parts can be found in applications/robot_wars where the **gateway** is for the nRF91670 DK, the **gateway bridge** is for the communication between the nRF9160 DK and the nRF52840 DK and the **robot** is the nRF52840 DK.
+The different firmwares can be found in [`applications/robot_wars`](./applications/robot_wars) where the source code in the [`gateway` folder](./applications/robot_wars/gateway) is for the nRF91670 DK, the source code in the [`gateway_bridge` folder](./applications/robot_wars/gateway_bridge) implements the communication between the nRF9160 DK and the nRF52840 DK and the [`robot` folder](./applications/robot_wars/robot) contains the source code running on the nRF52840 DK.
